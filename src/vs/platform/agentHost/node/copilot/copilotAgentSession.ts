@@ -24,7 +24,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
-import { IFileService } from '../../../files/common/files.js';
+import { FileOperationResult, FileSystemProviderCapabilities, IFileService, toFileOperationResult } from '../../../files/common/files.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { ILogService, LogLevel } from '../../../log/common/log.js';
 import { ITelemetryService } from '../../../telemetry/common/telemetry.js';
@@ -42,6 +42,7 @@ import { stripRedundantCdPrefix } from '../../common/commandLineHelpers.js';
 import { toToolCallMeta, type IToolCallMeta, type IToolCallUiMeta, type IToolSearchCandidate } from '../../common/meta/agentToolCallMeta.js';
 import { OtelData, type OtelAttributeValue } from '../../common/otlp/otlpLogEmitter.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import { isShellInitScriptList, type IShellInitScript } from '../../common/shellInitScript.js';
 import { SEMANTIC_SEARCH_TOOL_NAME } from '../../common/semanticSearchConstants.js';
 import { resolveCopilotConfigSlashCommandOnSend } from '../../common/copilotConfigSlashCommands.js';
 import { STREAMING_TOOL_DISPLAY_INTERVAL_MS, streamingToolDisplayText } from '../../common/streamingToolCallDisplay.js';
@@ -978,6 +979,15 @@ export class CopilotAgentSession extends Disposable {
 
 	private readonly _onDidSessionProgress: Emitter<AgentSignal>;
 	private readonly _sessionLauncher: ICopilotSessionLauncher;
+	/** Last config materialized and pushed, so unchanged turns do no file I/O or RPC. */
+	private _lastAppliedShellInitScripts: string | undefined;
+	private readonly _shellInitScriptSequencer = new Sequencer();
+	private _shellInitScriptDisposing = false;
+	/**
+	 * Scopes this instance's script files so a disposed predecessor's queued
+	 * cleanup for the same SDK session cannot delete a successor's live script.
+	 */
+	private readonly _shellInitScriptInstanceId = generateUuid().substring(0, 8);
 	private readonly _launchPlan: CopilotSessionLaunchPlan;
 	private readonly _isLaunchTokenStillCurrent: () => boolean;
 	/** Notifies the agent that this chat's turn ended. See {@link ICopilotAgentSessionOptions.onTurnEnded}. */
@@ -2037,6 +2047,7 @@ export class CopilotAgentSession extends Disposable {
 		this._subscribeForMemoInvalidation();
 		this._subscribeForInstructionsCollectedTelemetry();
 		this._subscribeToPermissionConfigChanges();
+		await this._syncShellInitScript();
 		this._promptCacheState = this._promptCache.read(this.resourceUri);
 		if (this._launchPlan.kind === 'resume') {
 			await this._refreshSessionUsageMetrics();
@@ -2503,6 +2514,7 @@ export class CopilotAgentSession extends Disposable {
 		await this.applyMode(mode);
 		await this.syncPermissionMode('turn-start');
 		await this._applyEffectiveSandboxConfig();
+		await this._syncShellInitScript();
 		await this._reconcileMcpServerEnablement();
 	}
 
@@ -2853,6 +2865,7 @@ export class CopilotAgentSession extends Disposable {
 		void this._editTracker.flushAttribution().catch(error => {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to flush edit attribution: ${error}`);
 		});
+		void this._disposeShellInitScript();
 		this._beginAbort();
 		super.dispose();
 	}
@@ -2870,6 +2883,7 @@ export class CopilotAgentSession extends Disposable {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to flush edit attribution: ${error}`);
 		}
 		await this._wrapper.disconnect();
+		await this._disposeShellInitScript();
 	}
 
 	async setModel(model: string, reasoningEffort?: SessionConfig['reasoningEffort'], contextTier?: SessionConfig['contextTier']): Promise<void> {
@@ -3439,7 +3453,39 @@ export class CopilotAgentSession extends Disposable {
 			return undefined;
 		}
 		const sandbox = this._configurationService.getRootValue(sandboxConfigSchema, AgentHostSandboxConfigKey.Sandbox);
-		return buildSandboxConfigForSdk(this._platform, sandbox);
+		return buildSandboxConfigForSdk(this._platform, sandbox, this._sandboxExtraReadonlyPaths());
+	}
+
+	/**
+	 * Paths the sandboxed shell must be able to read beyond the user's own
+	 * policy. Currently just this session's shell init script directory: the
+	 * SDK requires each init script to be readable and fails silently when it
+	 * is not.
+	 *
+	 * Every producer of this session's `sandboxConfig` must include these, so
+	 * the list lives here rather than at a single call site.
+	 */
+	private _sandboxExtraReadonlyPaths(): readonly string[] {
+		return [this._shellInitScriptDirectory().fsPath];
+	}
+
+	/**
+	 * Session-scoped root granted to the sandbox; stable across instances of
+	 * the same SDK session so replacements do not churn the sandbox policy.
+	 */
+	private _shellInitScriptDirectory(): URI {
+		const sessionId = this.sessionId.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').substring(0, 128) || 'session';
+		return URI.joinPath(URI.file(this._environmentService.userDataPath), 'agentHost', 'shellInit', sessionId);
+	}
+
+	/**
+	 * Where this instance writes and deletes its script. Instance-scoped because
+	 * {@link dispose} queues the deletion without awaiting it: a resumed
+	 * replacement for the same SDK session can register its script first, and a
+	 * shared directory would let the stale cleanup remove the live file.
+	 */
+	private _shellInitScriptInstanceDirectory(): URI {
+		return URI.joinPath(this._shellInitScriptDirectory(), this._shellInitScriptInstanceId);
 	}
 
 	/**
@@ -3476,10 +3522,28 @@ export class CopilotAgentSession extends Disposable {
 			void this._syncPermissionModeAfterConfigChange();
 		}));
 		this._register(this._configurationService.onDidSessionConfigChange(event => {
-			if (event.session === this._ownerSessionUri.toString() && Object.hasOwn(event.config, SessionConfigKey.AutoApprove)) {
+			if (event.session !== this._ownerSessionUri.toString()) {
+				return;
+			}
+			if (Object.hasOwn(event.config, SessionConfigKey.AutoApprove)) {
 				void this._syncPermissionModeAfterConfigChange();
 			}
+			if (Object.hasOwn(event.config, SessionConfigKey.ShellInitSnippets)) {
+				void this._syncShellInitScript();
+			}
 		}));
+	}
+
+	private _syncShellInitScript(): Promise<void> {
+		if (this._shellInitScriptDisposing) {
+			return Promise.resolve();
+		}
+		return this._shellInitScriptSequencer.queue(() => this._applyEffectiveShellInitScripts());
+	}
+
+	private _disposeShellInitScript(): Promise<void> {
+		this._shellInitScriptDisposing = true;
+		return this._shellInitScriptSequencer.queue(() => this._clearShellInitScript());
 	}
 
 	private async _syncPermissionModeAfterConfigChange(): Promise<void> {
@@ -3552,7 +3616,7 @@ export class CopilotAgentSession extends Disposable {
 			return;
 		}
 		const sandbox = this._configurationService.getRootValue(sandboxConfigSchema, AgentHostSandboxConfigKey.Sandbox);
-		const base = buildSandboxConfigForSdk(this._platform, sandbox);
+		const base = buildSandboxConfigForSdk(this._platform, sandbox, this._sandboxExtraReadonlyPaths());
 		const sandboxConfig: SandboxConfig = base ?? { enabled: false };
 		try {
 			const result = await this._wrapper.session.rpc.options.update({ sandboxConfig });
@@ -3564,6 +3628,86 @@ export class CopilotAgentSession extends Disposable {
 				throw err;
 			}
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to update sandbox config for request`, err);
+		}
+	}
+
+	/** Applies the effective shell init script, including restoration after a cold resume. */
+	private async _applyEffectiveShellInitScripts(): Promise<void> {
+		if (this._shellInitScriptDisposing) {
+			return;
+		}
+		if (this._isCustomTerminalToolEnabled()) {
+			return;
+		}
+		try {
+			const configured = this._configurationService.getEffectiveValue(this._ownerSessionUri.toString(), platformSessionSchema, SessionConfigKey.ShellInitSnippets);
+			const snippets = isShellInitScriptList(configured) ? configured : [];
+			const serialized = JSON.stringify(snippets);
+			if (this._lastAppliedShellInitScripts === serialized) {
+				return;
+			}
+			if (snippets.length) {
+				// The SDK requires init scripts to be readable when registered.
+				await this._applyEffectiveSandboxConfig(true);
+			}
+			const refs = await this._materializeShellInitScript(snippets);
+			if (snippets.length && !refs.length) {
+				// The write failed. Leave the cache unchanged so the next turn
+				// retries rather than permanently treating the script as applied.
+				return;
+			}
+			if (!refs.length && this._lastAppliedShellInitScripts === undefined) {
+				// Nothing configured and nothing registered yet: skip the RPC that
+				// would clear an already-empty list. Most sessions never configure
+				// a script, so this keeps the common path free of an extra call.
+				this._lastAppliedShellInitScripts = serialized;
+				return;
+			}
+			const result = await this._wrapper.session.rpc.options.update({ shell: { initScripts: refs } });
+			if (!result.success) {
+				throw new Error('Copilot SDK rejected shell init script update');
+			}
+			this._lastAppliedShellInitScripts = serialized;
+			this._logService.trace(`[Copilot:${this.sessionId}] Applied ${refs.length} shell init script(s)`);
+		} catch (err) {
+			this._logService.warn(`[Copilot:${this.sessionId}] Failed to update shell init scripts`, err);
+		}
+	}
+
+	private async _materializeShellInitScript(scripts: readonly IShellInitScript[]): Promise<Array<{ shell: IShellInitScript['shell']; path: string }>> {
+		if (scripts.length !== 1) {
+			await this._clearShellInitScript();
+			return [];
+		}
+		const script = scripts[0];
+		const resource = URI.joinPath(this._shellInitScriptInstanceDirectory(), script.shell === 'powershell' ? 'init.ps1' : 'init.sh');
+		const atomic = this._fileService.hasCapability(resource, FileSystemProviderCapabilities.FileAtomicWrite)
+			? { postfix: '.vsctmp' }
+			: false;
+		try {
+			await this._fileService.writeFile(resource, VSBuffer.fromString(script.script), { atomic });
+			return [{ shell: script.shell, path: resource.fsPath }];
+		} catch (error) {
+			this._logService.warn(`[Copilot:${this.sessionId}] Failed to write shell init script: ${getErrorMessage(error)}`);
+			return [];
+		}
+	}
+
+	private async _clearShellInitScript(): Promise<void> {
+		try {
+			await this._fileService.del(this._shellInitScriptInstanceDirectory(), { recursive: true });
+		} catch (error) {
+			if (!(error instanceof Error) || toFileOperationResult(error) !== FileOperationResult.FILE_NOT_FOUND) {
+				this._logService.warn(`[Copilot:${this.sessionId}] Failed to remove shell init script: ${getErrorMessage(error)}`);
+			}
+		}
+		try {
+			// Non-recursive, so the session directory is only pruned once empty;
+			// while a successor instance still occupies it this fails, keeping
+			// that instance's script intact.
+			await this._fileService.del(this._shellInitScriptDirectory());
+		} catch {
+			// Occupied by a successor or already gone — both expected.
 		}
 	}
 
