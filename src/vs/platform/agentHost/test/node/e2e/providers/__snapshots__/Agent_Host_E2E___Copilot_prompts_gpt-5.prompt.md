@@ -765,7 +765,7 @@
     },
     {
       "name": "create_session",
-      "description": "Create delegated work and start it with an initial prompt. Set `relationship` to `currentSession` when the task belongs to the current plan or deliverable; this creates a new chat that shares the current session's workspace, lifecycle, and aggregate diff. Set it to `independent` only for a separate deliverable that needs its own workspace, provider, or top-level lifecycle. The UI shows a creation confirmation with a button to open the result, so reply with a single short sentence and do NOT print the session URL or tell the user to click a button.",
+      "description": "Create delegated work and start it with an initial prompt. Set `relationship` to `currentSession` when the task belongs to the current plan or deliverable; this creates a new chat that shares the current session's workspace, lifecycle, and aggregate diff. Set it to `independent` only for a separate deliverable that needs its own workspace, provider, or top-level lifecycle. For stacked independent work, pass `baseBranch` to create an isolated worktree from that branch. The UI shows a creation confirmation with a button to open the result, so reply with a single short sentence and do NOT print the session URL or tell the user to click a button.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -784,6 +784,10 @@
           "workspace": {
             "type": "string",
             "description": "For `independent` work: unique project name, project/workspace URI, absolute folder path, or working directory from an existing session. Required for `independent` and invalid for `currentSession`."
+          },
+          "baseBranch": {
+            "type": "string",
+            "description": "For `independent` work: optional base branch for a new isolated worktree. Use this only to stack the session on in-progress work; invalid for `currentSession`."
           },
           "title": {
             "type": "string",

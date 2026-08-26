@@ -14,6 +14,7 @@ import type { IAgentServerToolDefinition } from '../../common/agentServerTools.j
 import { buildChatUri, buildDefaultChatUri, getInlineToolInput, getSessionRelatedPullRequestUrls, isDefaultChatUri, isSessionStatusArchived, isSessionStatusRead, parseChatUri, readSessionGitState, readSessionGitHubState, ResponsePartKind, ToolCallStatus, TurnState, withSessionCreationReference, type Message, type ModelSelection, type ResponsePart, type ToolCallState, type ToolDefinition, type Turn, type URI as ProtocolURI } from '../../common/state/sessionState.js';
 import { buildOpenSessionLinkUri, parseOpenSessionLinkChatId, parseOpenSessionLinkUri } from '../../common/openSessionLink.js';
 import { SessionServerToolName } from '../../common/serverToolNames.js';
+import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import type { AgentHostStateManager } from '../agentHostStateManager.js';
 import type { IServerToolDisplay, IServerToolDisplayResult, IServerToolGroup } from './agentServerToolHost.js';
@@ -74,6 +75,7 @@ const createSessionInputSchema: ToolDefinition['inputSchema'] = {
 		},
 		prompt: { type: 'string', description: 'Initial prompt to send to the new session.' },
 		workspace: { type: 'string', description: 'For `independent` work: unique project name, project/workspace URI, absolute folder path, or working directory from an existing session. Required for `independent` and invalid for `currentSession`.' },
+		baseBranch: { type: 'string', description: 'For `independent` work: optional base branch for a new isolated worktree. Use this only to stack the session on in-progress work; invalid for `currentSession`.' },
 		title: { type: 'string', maxLength: 200, description: 'Short title for the new chat or independent session.' },
 		model: { type: 'string', description: 'Optional model ID or display name. Defaults to the current chat\'s model. For `currentSession`, the model must belong to the current session\'s provider; for `independent`, the model selects the new session\'s provider.' },
 	},
@@ -148,7 +150,7 @@ export const sessionServerToolDefinitions: IAgentServerToolDefinition[] = [
 	{
 		name: SessionServerToolName.CreateSession,
 		title: 'Create Session',
-		description: 'Create delegated work and start it with an initial prompt. Set `relationship` to `currentSession` when the task belongs to the current plan or deliverable; this creates a new chat that shares the current session\'s workspace, lifecycle, and aggregate diff. Set it to `independent` only for a separate deliverable that needs its own workspace, provider, or top-level lifecycle. The UI shows a creation confirmation with a button to open the result, so reply with a single short sentence and do NOT print the session URL or tell the user to click a button.',
+		description: 'Create delegated work and start it with an initial prompt. Set `relationship` to `currentSession` when the task belongs to the current plan or deliverable; this creates a new chat that shares the current session\'s workspace, lifecycle, and aggregate diff. Set it to `independent` only for a separate deliverable that needs its own workspace, provider, or top-level lifecycle. For stacked independent work, pass `baseBranch` to create an isolated worktree from that branch. The UI shows a creation confirmation with a button to open the result, so reply with a single short sentence and do NOT print the session URL or tell the user to click a button.',
 		inputSchema: createSessionInputSchema,
 		annotations: { readOnlyHint: false },
 	},
@@ -194,6 +196,7 @@ interface ICreateSessionArgs {
 	readonly prompt?: unknown;
 	readonly title?: unknown;
 	readonly model?: unknown;
+	readonly baseBranch?: unknown;
 }
 
 export type IResolvedCreateSessionArgs = {
@@ -207,6 +210,7 @@ export type IResolvedCreateSessionArgs = {
 	readonly prompt: string;
 	readonly title: string;
 	readonly model?: IAgentModelInfo;
+	readonly baseBranch?: string;
 };
 
 /** Minimal dependency surface needed by the session server-tool group. */
@@ -439,10 +443,14 @@ export function getCreateSessionArgs(rawArgs: unknown, sessions: readonly IAgent
 	validateRenameTitle(title, SessionServerToolName.CreateSession);
 	const workspace = getOptionalString(args.workspace, 'workspace', SessionServerToolName.CreateSession);
 	const modelName = getOptionalString(args.model, 'model', SessionServerToolName.CreateSession);
+	const baseBranch = getOptionalString(args.baseBranch, 'baseBranch', SessionServerToolName.CreateSession);
 	const model = resolveModel(modelName, models, relationship === 'currentSession' ? currentProvider : undefined);
 	if (relationship === 'currentSession') {
 		if (workspace !== undefined) {
 			throw new Error(`Invalid ${SessionServerToolName.CreateSession} input: workspace is only valid when relationship is "independent".`);
+		}
+		if (baseBranch !== undefined) {
+			throw new Error(`Invalid ${SessionServerToolName.CreateSession} input: baseBranch is only valid when relationship is "independent".`);
 		}
 		return {
 			relationship,
@@ -457,6 +465,7 @@ export function getCreateSessionArgs(rawArgs: unknown, sessions: readonly IAgent
 		prompt,
 		title,
 		...(model !== undefined ? { model } : {}),
+		...(baseBranch !== undefined ? { baseBranch } : {}),
 	};
 }
 
@@ -744,11 +753,19 @@ export async function applyCreateSessionTool(accessor: ISessionServerToolAccesso
 	const defaults = source ? accessor.getCreationDefaults(source) : undefined;
 	const provider = args.model?.provider ?? defaults?.provider;
 	const inheritsSourceProvider = provider !== undefined && provider === defaults?.provider;
+	const inheritedConfig = inheritsSourceProvider ? defaults?.config : undefined;
+	const sessionConfigValues = args.baseBranch !== undefined
+		? {
+			...inheritedConfig,
+			[SessionConfigKey.Isolation]: 'worktree',
+			[SessionConfigKey.Branch]: args.baseBranch,
+		}
+		: inheritedConfig;
 	const config: IAgentCreateSessionConfig = {
 		workingDirectories: args.workspace ? [args.workspace] : undefined,
 		...(provider !== undefined ? { provider } : {}),
 		...(args.model !== undefined ? { model: { id: args.model.id } } : defaults?.model !== undefined ? { model: defaults.model } : {}),
-		...(inheritsSourceProvider && defaults?.config !== undefined ? { config: defaults.config } : {}),
+		...(sessionConfigValues !== undefined ? { config: sessionConfigValues } : {}),
 		...(currentSession !== undefined && source !== undefined ? {
 			_meta: withSessionCreationReference(undefined, {
 				session: currentSession.toString(),

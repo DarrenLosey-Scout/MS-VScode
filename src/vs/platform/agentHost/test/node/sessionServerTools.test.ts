@@ -109,6 +109,7 @@ suite('SessionServerTools', () => {
 				},
 				prompt: { type: 'string', description: 'Initial prompt to send to the new session.' },
 				workspace: { type: 'string', description: 'For `independent` work: unique project name, project/workspace URI, absolute folder path, or working directory from an existing session. Required for `independent` and invalid for `currentSession`.' },
+				baseBranch: { type: 'string', description: 'For `independent` work: optional base branch for a new isolated worktree. Use this only to stack the session on in-progress work; invalid for `currentSession`.' },
 				title: { type: 'string', maxLength: 200, description: 'Short title for the new chat or independent session.' },
 				model: { type: 'string', description: 'Optional model ID or display name. Defaults to the current chat\'s model. For `currentSession`, the model must belong to the current session\'s provider; for `independent`, the model selects the new session\'s provider.' },
 			},
@@ -463,7 +464,7 @@ suite('SessionServerTools', () => {
 
 	test('getCreateSessionArgs resolves workspace by working directory and model by id/name', () => {
 		const sessions = [sessionMeta('s1', SessionStatus.Idle, workspace)];
-		const byId = getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'Task', model: 'gpt-4o' }, sessions, [model]);
+		const byId = getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'Task', model: 'gpt-4o', baseBranch: 'feature/base' }, sessions, [model]);
 		const byName = getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'Task', model: 'GPT-4o' }, sessions, [model]);
 		assert.deepStrictEqual({
 			byId: {
@@ -471,6 +472,7 @@ suite('SessionServerTools', () => {
 				workspace: byId.relationship === 'independent' ? byId.workspace.toString() : undefined,
 				title: byId.title,
 				model: byId.model?.id,
+				baseBranch: byId.relationship === 'independent' ? byId.baseBranch : undefined,
 			},
 			byName: {
 				relationship: byName.relationship,
@@ -478,7 +480,7 @@ suite('SessionServerTools', () => {
 				model: byName.model?.name,
 			},
 		}, {
-			byId: { relationship: 'independent', workspace: workspace.toString(), title: 'Task', model: 'gpt-4o' },
+			byId: { relationship: 'independent', workspace: workspace.toString(), title: 'Task', model: 'gpt-4o', baseBranch: 'feature/base' },
 			byName: { relationship: 'independent', title: 'Task', model: 'GPT-4o' },
 		});
 	});
@@ -538,11 +540,13 @@ suite('SessionServerTools', () => {
 	test('getCreateSessionArgs throws on invalid input', () => {
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: 'not a uri', prompt: 'hi', title: 'Task' }, [], []), /workspace/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'Task', model: 'nope' }, [], [model]), /model/);
+		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'Task', baseBranch: '' }, [], []), /baseBranch/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), title: 'Task' }, [], []), /prompt/);
 		assert.throws(() => getCreateSessionArgs({ workspace: workspace.toString(), prompt: 'hi', title: 'Task' }, [], []), /relationship/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'other', prompt: 'hi', title: 'Task' }, [], []), /relationship/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', prompt: 'hi', title: 'Task' }, [], []), /workspace/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'currentSession', workspace: workspace.toString(), prompt: 'hi', title: 'Task' }, [], []), /workspace/);
+		assert.throws(() => getCreateSessionArgs({ relationship: 'currentSession', prompt: 'hi', title: 'Task', baseBranch: 'main' }, [], []), /baseBranch/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi' }, [], []), /title/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: ' ' }, [], []), /non-whitespace/);
 		assert.throws(() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'x'.repeat(201) }, [], []), /must not exceed 200/);
@@ -641,6 +645,47 @@ suite('SessionServerTools', () => {
 		store.dispose();
 	});
 
+	test('create_session uses an isolated worktree based on the requested branch', async () => {
+		let created: IAgentCreateSessionConfig | undefined;
+		const accessor = createAccessor({
+			getCreationDefaults: () => ({
+				provider: 'copilot',
+				model: { id: 'gpt-inherited' },
+				config: {
+					autoApprove: 'autoApprove',
+					permissions: { allow: ['shell'] },
+					isolation: 'folder',
+					branch: 'main',
+				},
+			}),
+			onCreate: config => { created = config; },
+		});
+
+		await applyCreateSessionTool(accessor, {
+			relationship: 'independent',
+			workspace: workspace.toString(),
+			prompt: 'implement layer two',
+			title: 'Layer Two',
+			baseBranch: 'feature/layer-one',
+		}, URI.parse('copilot:/source'));
+
+		assert.deepStrictEqual(createConfigSnapshot(created), {
+			workingDirectories: [workspace],
+			provider: 'copilot',
+			model: { id: 'gpt-inherited' },
+			createdBySession: {
+				session: 'copilot:/source',
+				chat: 'copilot:/source',
+			},
+			config: {
+				autoApprove: 'autoApprove',
+				permissions: { allow: ['shell'] },
+				isolation: 'worktree',
+				branch: 'feature/layer-one',
+			},
+		});
+	});
+
 	test('create_session inherits the calling provider when its model is the provider default', async () => {
 		let created: IAgentCreateSessionConfig | undefined;
 		const accessor = createAccessor({
@@ -685,12 +730,17 @@ suite('SessionServerTools', () => {
 			prompt: 'do it',
 			title: 'Remote Task',
 			model: 'claude-sonnet',
+			baseBranch: 'feature/copilot-base',
 		}, URI.parse('copilot:/source'));
 
 		assert.deepStrictEqual(createConfigSnapshot(created), {
 			workingDirectories: [remoteProject],
 			provider: 'claude',
 			model: { id: 'claude-sonnet' },
+			config: {
+				isolation: 'worktree',
+				branch: 'feature/copilot-base',
+			},
 			createdBySession: {
 				session: 'copilot:/source',
 				chat: 'copilot:/source',
