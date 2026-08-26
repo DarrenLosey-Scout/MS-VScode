@@ -16,7 +16,10 @@ import { mock } from '../../../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
 import { runWithFakedTimers } from '../../../../../../../base/test/common/timeTravelScheduler.js';
 import { timeout } from '../../../../../../../base/common/async.js';
+import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { TestInstantiationService } from '../../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { ITelemetryService } from '../../../../../../../platform/telemetry/common/telemetry.js';
+import { NullTelemetryServiceShape } from '../../../../../../../platform/telemetry/common/telemetryUtils.js';
 import { IAccessibleViewService } from '../../../../../../../platform/accessibility/browser/accessibleView.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { TerminalCapabilityStore } from '../../../../../../../platform/terminal/common/capabilities/terminalCapabilityStore.js';
@@ -29,6 +32,7 @@ import { DiffEditorPool, EditorPool } from '../../../../browser/widget/chatConte
 import { ChatTerminalThinkingCollapsibleWrapper, ChatTerminalToolOutputSection, ChatTerminalToolProgressPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
 import { IChatSessionsService } from '../../../../common/chatSessionsService.js';
 import { IChatTerminalToolInvocationData, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
+import { ChatConfiguration } from '../../../../common/constants.js';
 import { IChatResponseViewModel } from '../../../../common/model/chatViewModel.js';
 import { TerminalToolAutoExpand, TerminalToolAutoExpandTimeout } from '../../../../browser/widget/chatContentParts/toolInvocationParts/terminalToolAutoExpand.js';
 import { IChatTerminalToolProgressPart, ITerminalChatService, ITerminalConfigurationService, ITerminalInstance, ITerminalService, type IDetachedXTermOptions } from '../../../../../terminal/browser/terminal.js';
@@ -298,6 +302,7 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 				false,
 				true,
 				undefined,
+				true,
 			));
 			mainWindow.document.body.appendChild(part.domNode);
 			store.add(toDisposable(() => part.domNode.remove()));
@@ -326,6 +331,66 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 				containsTerminal: true,
 				hasShowLink: false,
 			});
+		});
+
+		test('logs telemetry when the user toggles the header', () => {
+			const context: IChatContentPartRenderContext = {
+				element: Object.assign(Object.create(null) as IChatResponseViewModel, {
+					id: 'response',
+					sessionResource: URI.parse('chat-session://test/session'),
+				}),
+				elementIndex: 0,
+				container: mainWindow.document.createElement('div'),
+				content: [],
+				contentIndex: 0,
+				inlineTextModels: Object.create(InlineTextModelCollection.prototype) as InlineTextModelCollection,
+				editorPool: Object.create(EditorPool.prototype) as EditorPool,
+				codeBlockStartIndex: 0,
+				treeStartIndex: 0,
+				diffEditorPool: Object.create(DiffEditorPool.prototype) as DiffEditorPool,
+				currentWidth: observableValue('testWidth', 500),
+				onDidChangeVisibility: Event.None,
+			};
+			const telemetryService = new class extends NullTelemetryServiceShape {
+				readonly events: { readonly name: string; readonly data: unknown }[] = [];
+				override publicLog2(eventName?: string, data?: unknown): void {
+					if (eventName) {
+						this.events.push({ name: eventName, data });
+					}
+				}
+			}();
+			const instantiationService = workbenchInstantiationService(undefined, store);
+			instantiationService.stub(ITelemetryService, telemetryService);
+			const thinkingStyle = instantiationService.get(IConfigurationService).getValue<string>(ChatConfiguration.ThinkingStyle) ?? 'unknown';
+			const part = store.add(instantiationService.createInstance(
+				ChatTerminalThinkingCollapsibleWrapper,
+				'echo test',
+				undefined,
+				false,
+				mainWindow.document.createElement('div'),
+				context,
+				false,
+				false,
+				false,
+				false,
+				undefined,
+				true,
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			store.add(toDisposable(() => part.domNode.remove()));
+
+			const button = part.domNode.querySelector<HTMLElement>('.monaco-button');
+			assert.ok(button);
+			part.expand();
+			button.click();
+			button.click();
+
+			assert.deepStrictEqual(telemetryService.events, [
+				{ name: 'chat.collapsibleToggle', data: { kind: 'terminal', previousExpanded: true, thinkingStyle, inThinking: true } },
+				{ name: 'terminal/chatThinkingBlockToggle', data: { previousExpanded: true, inThinking: true, thinkingStyle } },
+				{ name: 'chat.collapsibleToggle', data: { kind: 'terminal', previousExpanded: false, thinkingStyle, inThinking: true } },
+				{ name: 'terminal/chatThinkingBlockToggle', data: { previousExpanded: false, inThinking: true, thinkingStyle } },
+			]);
 		});
 	});
 

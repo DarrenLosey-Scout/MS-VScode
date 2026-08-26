@@ -8,6 +8,7 @@ import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { localize } from '../../../../../../nls.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
+import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IChatAutoModeResolutionPart } from '../../../common/chatService/chatService.js';
 import { ILanguageModelChatMetadata } from '../../../common/languageModels.js';
@@ -24,12 +25,17 @@ import './media/chatAutoModeResolution.css';
  */
 export class ChatAutoModeResolutionContentPart extends ChatCollapsibleContentPart {
 
+	protected override get collapsibleKind(): string {
+		return 'autoModeResolution';
+	}
+
 	constructor(
 		private readonly content: IChatAutoModeResolutionPart,
 		context: IChatContentPartRenderContext,
 		private readonly chatContentMarkdownRenderer: IMarkdownRenderer,
 		@IHoverService hoverService: IHoverService,
 		@IConfigurationService configurationService: IConfigurationService,
+		@ITelemetryService telemetryService: ITelemetryService,
 	) {
 		super(
 			localize('autoModeResolution.title', "Routed to {0}", content.resolvedModelName),
@@ -37,6 +43,7 @@ export class ChatAutoModeResolutionContentPart extends ChatCollapsibleContentPar
 			undefined,
 			hoverService,
 			configurationService,
+			telemetryService,
 		);
 	}
 
