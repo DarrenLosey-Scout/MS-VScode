@@ -340,6 +340,7 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 	private initialized = false;
 	private readonly initPromise: Promise<void>;
 	private readonly updateThrottler = this._register(new ThrottledDelayer(100));
+	private defaultAccountUpdateGeneration = 0;
 	private readonly accountDataPollScheduler = this._register(new RunOnceScheduler(() => this.refetchDefaultAccount(), ACCOUNT_DATA_POLL_INTERVAL_MS));
 	private readonly managedSettingsFetchAttemptedAccounts = new Set<string>();
 	private readonly failedManagedSettingsFreshness = new Map<string, ManagedSettingsBlockedFreshness>();
@@ -447,6 +448,7 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 			const hasReplacementCandidates = !!e.event.added?.length || !!e.event.changed?.length;
 			if (currentSessionRemoved && !hasReplacementCandidates) {
 				this.logService.trace(`[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=true; clearing default account`);
+				this.defaultAccountUpdateGeneration++;
 				this.setDefaultAccount(null);
 			} else {
 				this.logService.trace(`[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=${!!currentSessionRemoved}; reconciling default account`);
@@ -560,12 +562,17 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 	}
 
 	private async updateDefaultAccount(options?: IDefaultAccountRefreshOptions): Promise<void> {
-		await this.updateThrottler.trigger(() => this.doUpdateDefaultAccount(options));
+		const updateGeneration = this.defaultAccountUpdateGeneration;
+		await this.updateThrottler.trigger(() => this.doUpdateDefaultAccount(options, updateGeneration));
 	}
 
-	private async doUpdateDefaultAccount(options?: IDefaultAccountRefreshOptions): Promise<void> {
+	private async doUpdateDefaultAccount(options?: IDefaultAccountRefreshOptions, updateGeneration = this.defaultAccountUpdateGeneration): Promise<void> {
 		try {
 			const defaultAccount = await this.fetchDefaultAccount(options);
+			if (updateGeneration !== this.defaultAccountUpdateGeneration) {
+				this.logService.trace('[DefaultAccount] Discarding default account update invalidated by a session removal');
+				return;
+			}
 			this.setDefaultAccount(defaultAccount);
 			this.scheduleAccountDataPoll();
 		} catch (error) {

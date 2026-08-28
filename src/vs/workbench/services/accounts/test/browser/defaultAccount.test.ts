@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { timeout } from '../../../../../base/common/async.js';
+import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
 import { bufferToStream, VSBuffer } from '../../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IRequestContext, IRequestOptions } from '../../../../../base/parts/request/common/request.js';
@@ -839,6 +839,63 @@ suite('DefaultAccountProvider', () => {
 			afterRemoval: undefined,
 			afterSeparateEvents: 'separate-replacement-session',
 			observedSessionIds: ['replacement-session', null, 'separate-replacement-session'],
+		});
+	});
+
+	test('does not restore a removed session from an in-flight replacement refresh', async () => {
+		const sessionChanges = disposables.add(new Emitter<{ providerId: string; label: string; event: AuthenticationSessionsChangeEvent }>());
+		const refreshStarted = new DeferredPromise<void>();
+		const releaseRefresh = new DeferredPromise<IRequestContext>();
+		let authenticationSessions = sessions;
+		let blockRefresh = false;
+		const provider = await createProvider(
+			new TestRequestService(async options => {
+				if (blockRefresh && options.callSite === 'defaultAccount.entitlements') {
+					await refreshStarted.complete();
+					return releaseRefresh.p;
+				}
+				return jsonResponse({ chat_enabled: true });
+			}),
+			{},
+			{},
+			'',
+			{
+				getSessions: async () => authenticationSessions,
+				onDidChangeSessions: sessionChanges.event,
+			}
+		);
+		const observedSessionIds: Array<string | null> = [];
+		disposables.add(provider.onDidChangeDefaultAccount(account => observedSessionIds.push(account?.sessionId ?? null)));
+		const replacementSession = { ...sessions[0], accessToken: 'replacement-token' };
+		authenticationSessions = [replacementSession];
+		blockRefresh = true;
+
+		sessionChanges.fire({
+			providerId: 'github',
+			label: 'GitHub',
+			event: { added: [replacementSession], removed: sessions, changed: [] },
+		});
+		const replacementRefresh = provider.refresh({ forceRefresh: true });
+		await refreshStarted.p;
+
+		authenticationSessions = [];
+		sessionChanges.fire({
+			providerId: 'github',
+			label: 'GitHub',
+			event: { added: [], removed: [replacementSession], changed: [] },
+		});
+		const afterRemoval = provider.defaultAccount?.sessionId;
+		await releaseRefresh.complete(jsonResponse({ chat_enabled: false }));
+		await replacementRefresh;
+
+		assert.deepStrictEqual({
+			afterRemoval,
+			afterBlockedRefresh: provider.defaultAccount?.sessionId,
+			observedSessionIds,
+		}, {
+			afterRemoval: undefined,
+			afterBlockedRefresh: undefined,
+			observedSessionIds: [null],
 		});
 	});
 
