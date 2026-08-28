@@ -446,9 +446,11 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 			const currentSessionRemoved = this.defaultAccount && e.event.removed?.some(session => session.id === this.defaultAccount?.sessionId);
 			const hasReplacementCandidates = !!e.event.added?.length || !!e.event.changed?.length;
 			if (currentSessionRemoved && !hasReplacementCandidates) {
+				this.logService.trace(`[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=true; clearing default account`);
 				this.setDefaultAccount(null);
 			} else {
-				this.logService.debug('[DefaultAccount] Sessions changed for default account provider, updating default account');
+				const message = `[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=${!!currentSessionRemoved}; reconciling default account`;
+				this.logService.trace(message);
 				this.updateDefaultAccount();
 			}
 		}));
