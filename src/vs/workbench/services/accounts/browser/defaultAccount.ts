@@ -443,7 +443,9 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 			if (e.providerId !== defaultAccountProvider.id) {
 				return;
 			}
-			if (this.defaultAccount && e.event.removed?.some(session => session.id === this.defaultAccount?.sessionId)) {
+			const currentSessionRemoved = this.defaultAccount && e.event.removed?.some(session => session.id === this.defaultAccount?.sessionId);
+			const hasReplacementCandidates = !!e.event.added?.length || !!e.event.changed?.length;
+			if (currentSessionRemoved && !hasReplacementCandidates) {
 				this.setDefaultAccount(null);
 			} else {
 				this.logService.debug('[DefaultAccount] Sessions changed for default account provider, updating default account');

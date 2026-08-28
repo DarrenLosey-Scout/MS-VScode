@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { timeout } from '../../../../../base/common/async.js';
 import { bufferToStream, VSBuffer } from '../../../../../base/common/buffer.js';
-import { Event } from '../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IRequestContext, IRequestOptions } from '../../../../../base/parts/request/common/request.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -23,14 +23,14 @@ import { IRequestService } from '../../../../../platform/request/common/request.
 import { InMemoryStorageService, IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { NullTelemetryService } from '../../../../../platform/telemetry/common/telemetryUtils.js';
-import { AuthenticationSession, IAuthenticationExtensionsService, IAuthenticationService } from '../../../authentication/common/authentication.js';
+import { AuthenticationSession, AuthenticationSessionsChangeEvent, IAuthenticationExtensionsService, IAuthenticationService } from '../../../authentication/common/authentication.js';
 import { IWorkbenchEnvironmentService } from '../../../environment/common/environmentService.js';
 import { IExtensionService } from '../../../extensions/common/extensions.js';
 import { IHostService } from '../../../host/browser/host.js';
 import { DefaultAccountProvider } from '../../browser/defaultAccount.js';
 import { TestProductService } from '../../../../test/common/workbenchTestServices.js';
 
-suite('DefaultAccountProvider managed settings', () => {
+suite('DefaultAccountProvider', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 	const accountId = 'account';
@@ -775,11 +775,79 @@ suite('DefaultAccountProvider managed settings', () => {
 		});
 	});
 
+	test('reconciles a replacement without a signed-out gap and preserves removal-only behavior', async () => {
+		const sessionChanges = disposables.add(new Emitter<{ providerId: string; label: string; event: AuthenticationSessionsChangeEvent }>());
+		let authenticationSessions = sessions;
+		const provider = await createProvider(
+			new TestRequestService(async () => jsonResponse({ chat_enabled: true })),
+			{},
+			{},
+			'',
+			{
+				getSessions: async () => authenticationSessions,
+				onDidChangeSessions: sessionChanges.event,
+			}
+		);
+		const observedSessionIds: Array<string | null> = [];
+		disposables.add(provider.onDidChangeDefaultAccount(account => observedSessionIds.push(account?.sessionId ?? null)));
+		const beforeReplacement = provider.defaultAccount?.sessionId;
+		const replacementSession = { ...sessions[0], id: 'replacement-session', accessToken: 'replacement-token' };
+		authenticationSessions = [replacementSession];
+		const replacement = Event.toPromise(Event.filter(
+			provider.onDidChangeDefaultAccount,
+			account => account?.sessionId === replacementSession.id
+		));
+
+		sessionChanges.fire({
+			providerId: 'github',
+			label: 'GitHub',
+			event: { added: [replacementSession], removed: sessions, changed: [] },
+		});
+		const afterReplacementEvent = provider.defaultAccount?.sessionId;
+		const afterReplacement = (await replacement)?.sessionId;
+
+		sessionChanges.fire({
+			providerId: 'github',
+			label: 'GitHub',
+			event: { added: [], removed: [replacementSession], changed: [] },
+		});
+		const afterRemoval = provider.defaultAccount?.sessionId;
+		const separateReplacementSession = { ...sessions[0], id: 'separate-replacement-session', accessToken: 'separate-replacement-token' };
+		authenticationSessions = [separateReplacementSession];
+		const separateReplacement = Event.toPromise(Event.filter(
+			provider.onDidChangeDefaultAccount,
+			account => account?.sessionId === separateReplacementSession.id
+		));
+		sessionChanges.fire({
+			providerId: 'github',
+			label: 'GitHub',
+			event: { added: [separateReplacementSession], removed: [], changed: [] },
+		});
+		const afterSeparateEvents = (await separateReplacement)?.sessionId;
+
+		assert.deepStrictEqual({
+			beforeReplacement,
+			afterReplacementEvent,
+			afterReplacement,
+			afterRemoval,
+			afterSeparateEvents,
+			observedSessionIds,
+		}, {
+			beforeReplacement: 'session',
+			afterReplacementEvent: 'session',
+			afterReplacement: 'replacement-session',
+			afterRemoval: undefined,
+			afterSeparateEvents: 'separate-replacement-session',
+			observedSessionIds: ['replacement-session', null, 'separate-replacement-session'],
+		});
+	});
+
 	async function createProvider(
 		requestService: TestRequestService,
 		nativeManagedSettings: ManagedSettingsData = {},
 		fileManagedSettings: ManagedSettingsData = {},
-		managedSettingsUrl = 'https://api.github.com/copilot_internal/managed_settings'
+		managedSettingsUrl = 'https://api.github.com/copilot_internal/managed_settings',
+		authenticationServiceOverrides: Partial<IAuthenticationService> = {},
 	): Promise<DefaultAccountProvider> {
 		const instantiationService = disposables.add(new TestInstantiationService());
 		instantiationService.stub(IConfigurationService, new TestConfigurationService());
@@ -792,6 +860,7 @@ suite('DefaultAccountProvider managed settings', () => {
 			onDidChangeSessions: Event.None,
 			onDidRegisterAuthenticationProvider: Event.None,
 			onDidUnregisterAuthenticationProvider: Event.None,
+			...authenticationServiceOverrides,
 		});
 		instantiationService.stub(IAuthenticationExtensionsService, {
 			getAccountPreference: () => undefined,
