@@ -449,8 +449,7 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 				this.logService.trace(`[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=true; clearing default account`);
 				this.setDefaultAccount(null);
 			} else {
-				const message = `[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=${!!currentSessionRemoved}; reconciling default account`;
-				this.logService.trace(message);
+				this.logService.trace(`[DefaultAccount] Authentication sessions changed: added=${e.event.added?.length ?? 0}, removed=${e.event.removed?.length ?? 0}, changed=${e.event.changed?.length ?? 0}, currentSessionRemoved=${!!currentSessionRemoved}; reconciling default account`);
 				this.updateDefaultAccount();
 			}
 		}));
