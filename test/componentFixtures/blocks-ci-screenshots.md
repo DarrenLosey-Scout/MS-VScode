@@ -181,10 +181,10 @@
 ![screenshot](https://hediet-screenshots.azurewebsites.net/images/fe4b95bf8348637bba9f8c0dda791924e6c67fd7b5d173398f9b2c0bfc9f7071)
 
 #### sessions/chat/newWidget/newChatWidget/NewSessionAttachedContext/Dark
-![screenshot](https://hediet-screenshots.azurewebsites.net/images/6a5bf30c31efb3f541b310b04a0b2a864c3ebd5af771a2927a83ca0cb12fb13f)
+![screenshot](https://hediet-screenshots.azurewebsites.net/images/51c4e7117139edf29a3ab86c85ac42df6a7748cdfcf2773751ed1ab777eaf059)
 
 #### sessions/chat/newWidget/newChatWidget/NewSessionAttachedContext/Light
-![screenshot](https://hediet-screenshots.azurewebsites.net/images/85144b21574a7f0df6efaa70ff311e5b7a5da6f413e5afb6741130d04482a926)
+![screenshot](https://hediet-screenshots.azurewebsites.net/images/0496a6c7a926107a1f3275b163144efcff7934144ccbf51b15ba61ab6d6af66e)
 
 #### sessions/chat/newWidget/newChatWidget/NewSessionGitHubContextPicker/Dark
 ![screenshot](https://hediet-screenshots.azurewebsites.net/images/d65a5c982df3188ca688e5b0c317ecc5f0be1451a0061f56dab251a43d708c21)

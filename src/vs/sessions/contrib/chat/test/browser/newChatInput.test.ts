@@ -4,16 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { IIconLabelValueOptions } from '../../../../../base/browser/ui/iconLabel/iconLabel.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
 import { DeferredPromise } from '../../../../../base/common/async.js';
 import { DisposableStore, IDisposable, IReference } from '../../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../../base/common/network.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ITextModel } from '../../../../../editor/common/model.js';
 import { IResolvedTextEditorModel } from '../../../../../editor/common/services/resolverService.js';
+import { FileKind } from '../../../../../platform/files/common/files.js';
+import { ColorScheme } from '../../../../../platform/theme/common/theme.js';
+import { FileThemeIcon, FolderThemeIcon } from '../../../../../platform/theme/common/themeService.js';
+import { IFileLabelOptions } from '../../../../../workbench/browser/labels.js';
 import { hasSendableNewChatContent, NewChatInputWidget } from '../../browser/newChatInput.js';
-import { IChatRequestVariableEntry, toPasteVariableEntry } from '../../../../../workbench/contrib/chat/common/attachments/chatVariableEntries.js';
+import { IChatRequestVariableEntry } from '../../../../../workbench/contrib/chat/common/attachments/chatVariableEntries.js';
 import { NewChatContextAttachments } from '../../browser/newChatContextAttachments.js';
 import { getAdditionalFolderContextId, getAdditionalRepositoryContextId } from '../../common/newChatContextIds.js';
 
@@ -58,10 +65,20 @@ interface IAttachmentRenderingHarness {
 	readonly _renderDisposables: DisposableStore;
 	readonly _resourceLabels: {
 		clear(): void;
-		create(container: HTMLElement, options: { supportIcons: boolean }): IDisposable & {
-			setLabel(label: string): void;
-			setFile(resource: URI, options: object): void;
+		create(container: HTMLElement): IDisposable & {
+			setLabel(label: string, description?: string, options?: IIconLabelValueOptions): void;
+			setFile(resource: URI, options?: IFileLabelOptions): void;
 		};
+	};
+	readonly themeService: {
+		getFileIconTheme(): { hasFileIcons: boolean; hasFolderIcons: boolean };
+		getColorTheme(): { type: ColorScheme };
+	};
+	readonly modelService: {
+		getModel(): null;
+	};
+	readonly languageService: {
+		guessLanguageIdByFilepathOrFirstLine(): string;
 	};
 	removeAttachment(id: string): void;
 }
@@ -202,29 +219,89 @@ suite('NewChatInputWidget', () => {
 		});
 	});
 
-	test('renders a keyboard-reachable remove button for string context pills', () => {
+	test('renders leading remove buttons and attachment icons consistently', () => {
 		const container = document.createElement('div');
-		const entry = toPasteVariableEntry('microsoft/vscode#332825', 'GitHub context: https://github.com/microsoft/vscode/pull/332825', {
-			id: 'github-context:https://github.com/microsoft/vscode/pull/332825',
-		});
+		const entries: IChatRequestVariableEntry[] = [
+			{
+				kind: 'file',
+				id: 'file',
+				name: 'README.md',
+				value: URI.file('/workspace/README.md'),
+			},
+			{
+				kind: 'directory',
+				id: 'directory',
+				name: 'spritesheet',
+				value: URI.file('/workspace/spritesheet'),
+			},
+			{
+				kind: 'generic',
+				id: 'known',
+				name: 'Known context',
+				value: 'known',
+				icon: Codicon.repo,
+			},
+			{
+				kind: 'generic',
+				id: 'unknown',
+				name: 'Unknown context',
+				value: 'unknown',
+			},
+			{
+				kind: 'string',
+				id: 'themed-file',
+				name: 'Themed file',
+				value: 'themed-file',
+				uri: URI.parse('vscode://context/themed-file'),
+				resourceUri: URI.file('/workspace/src/index.ts'),
+				iconPath: FileThemeIcon,
+				handle: 1,
+			},
+		];
 		let removed: string | undefined;
+		const labels: { label: string; icon?: string; extraClasses?: readonly string[] }[] = [];
+		const files: { resource: string; fileKind?: FileKind; icon?: string }[] = [];
 		const renderDisposables = disposables.add(new DisposableStore());
 		updateAttachmentRendering.call({
 			_container: container,
-			_attachedContext: [entry],
+			_attachedContext: entries,
 			_renderDisposables: renderDisposables,
 			_resourceLabels: {
 				clear: () => { },
-				create: () => ({
-					dispose: () => { },
-					setLabel: () => { },
-					setFile: () => { },
-				}),
+				create: pill => {
+					const labelElement = document.createElement('span');
+					labelElement.className = 'resource-label';
+					pill.appendChild(labelElement);
+					return {
+						dispose: () => { },
+						setLabel: (label, _description, options) => labels.push({
+							label,
+							icon: ThemeIcon.isThemeIcon(options?.iconPath) ? options.iconPath.id : options?.iconPath?.toString(),
+							extraClasses: options?.extraClasses,
+						}),
+						setFile: (resource, options) => files.push({
+							resource: resource.path,
+							fileKind: options?.fileKind,
+							icon: ThemeIcon.isThemeIcon(options?.icon) ? options.icon.id : options?.icon?.toString(),
+						}),
+					};
+				},
+			},
+			themeService: {
+				getFileIconTheme: () => ({ hasFileIcons: true, hasFolderIcons: false }),
+				getColorTheme: () => ({ type: ColorScheme.DARK }),
+			},
+			modelService: {
+				getModel: () => null,
+			},
+			languageService: {
+				guessLanguageIdByFilepathOrFirstLine: () => 'typescript',
 			},
 			removeAttachment: id => removed = id,
 		});
 		const removeButton = container.querySelector<HTMLButtonElement>('.sessions-chat-attachment-remove');
 		const pill = container.querySelector<HTMLElement>('.sessions-chat-attachment-pill');
+		const openTarget = pill?.querySelector<HTMLElement>('.sessions-chat-attachment-content');
 		let bubbledKeyDown = false;
 		pill?.addEventListener('keydown', () => bubbledKeyDown = true);
 		removeButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -234,14 +311,41 @@ suite('NewChatInputWidget', () => {
 			tagName: removeButton?.tagName,
 			tabIndex: removeButton?.tabIndex,
 			ariaLabel: removeButton?.getAttribute('aria-label'),
+			pillChildren: Array.from(pill?.children ?? []).map(child => child.className),
+			openTarget: {
+				role: openTarget?.role,
+				tabIndex: openTarget?.tabIndex,
+				containsRemoveButton: openTarget?.contains(removeButton),
+			},
 			bubbledKeyDown,
 			removed,
+			files,
+			labels,
 		}, {
 			tagName: 'BUTTON',
 			tabIndex: 0,
-			ariaLabel: 'Remove microsoft/vscode#332825',
+			ariaLabel: 'Remove README.md',
+			pillChildren: ['sessions-chat-attachment-remove', 'sessions-chat-attachment-content'],
+			openTarget: {
+				role: 'button',
+				tabIndex: 0,
+				containsRemoveButton: false,
+			},
 			bubbledKeyDown: false,
-			removed: entry.id,
+			removed: entries[0].id,
+			files: [
+				{ resource: '/workspace/README.md', fileKind: FileKind.FILE, icon: undefined },
+				{ resource: '/workspace/spritesheet', fileKind: FileKind.FOLDER, icon: FolderThemeIcon.id },
+			],
+			labels: [
+				{ label: 'Known context', icon: Codicon.repo.id, extraClasses: undefined },
+				{ label: 'Unknown context', icon: Codicon.attach.id, extraClasses: undefined },
+				{
+					label: 'Themed file',
+					icon: undefined,
+					extraClasses: ['file-icon', 'src-name-dir-icon', 'index.ts-name-file-icon', 'name-file-icon', 'ts-ext-file-icon', 'ext-file-icon', 'typescript-lang-file-icon'],
+				},
+			],
 		});
 	});
 
@@ -275,6 +379,16 @@ suite('NewChatInputWidget', () => {
 					setLabel: label => pill.textContent = label,
 					setFile: (_resource, _options) => pill.textContent = 'docs',
 				}),
+			},
+			themeService: {
+				getFileIconTheme: () => ({ hasFileIcons: true, hasFolderIcons: false }),
+				getColorTheme: () => ({ type: ColorScheme.DARK }),
+			},
+			modelService: {
+				getModel: () => null,
+			},
+			languageService: {
+				guessLanguageIdByFilepathOrFirstLine: () => 'typescript',
 			},
 			removeAttachment: () => { },
 		});
