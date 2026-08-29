@@ -168,7 +168,7 @@ describe('pickSystemPrompt', () => {
 		PromptingStrategy.PatchBased02,
 		PromptingStrategy.PatchBased02WithRecentLineNumbers,
 		PromptingStrategy.PatchBased02Optimized,
-		PromptingStrategy.PatchBased02OptimizedFourInOne,
+		PromptingStrategy.PatchBased02OptimizedEagerness,
 		PromptingStrategy.PatchBased02WithoutRecentLineNumbers,
 		PromptingStrategy.Xtab275,
 		PromptingStrategy.XtabAggressiveness,
@@ -277,7 +277,7 @@ describe('overrideModelConfig', () => {
 	it('propagates the eagerness prompt from model configuration', () => {
 		const result = overrideModelConfig(makeBaseModelConfig(), {
 			modelName: 'four-in-one-model',
-			promptingStrategy: PromptingStrategy.PatchBased02OptimizedFourInOne,
+			promptingStrategy: PromptingStrategy.PatchBased02OptimizedEagerness,
 			eagernessPrompt: 'aggressionHighLow',
 			includeTagsInCurrentFile: false,
 			lintOptions: undefined,
@@ -1125,7 +1125,7 @@ describe('XtabProvider integration', () => {
 			const provider = createProvider();
 			await configService.setConfig(ConfigKey.Advanced.InlineEditsAggressiveness, AggressivenessSetting.High);
 			mockModelService.setDefaultConfig({
-				promptingStrategy: PromptingStrategy.PatchBased02OptimizedFourInOne,
+				promptingStrategy: PromptingStrategy.PatchBased02OptimizedEagerness,
 			});
 
 			const lines = ['const x = 1;'];

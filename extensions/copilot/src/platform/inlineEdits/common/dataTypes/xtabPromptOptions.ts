@@ -544,8 +544,8 @@ export enum PromptingStrategy {
 	PatchBased02WithRecentLineNumbers = 'patchBased02WithRecentLineNumbers',
 	/** Optimized PatchBased02 variant with line numbers on recent docs. */
 	PatchBased02Optimized = 'patchBased02Optimized',
-	/** Optimized PatchBased02 variant trained for four-in-one eagerness prompting. */
-	PatchBased02OptimizedFourInOne = 'patchBased02OptimizedFourInOne',
+	/** Optimized PatchBased02 variant trained for eagerness prompting. */
+	PatchBased02OptimizedEagerness = 'patchBased02OptimizedEagerness',
 	/** PatchBased02 variant: no line numbers on recent docs. */
 	PatchBased02WithoutRecentLineNumbers = 'patchBased02WithoutRecentLineNumbers',
 	/**
@@ -573,7 +573,7 @@ export function isEagernessPrompt(options: PromptOptions): boolean {
 	return (options.eagernessPrompt !== undefined && [
 		PromptingStrategy.PatchBased02,
 		PromptingStrategy.PatchBased02WithRecentLineNumbers,
-		PromptingStrategy.PatchBased02OptimizedFourInOne,
+		PromptingStrategy.PatchBased02OptimizedEagerness,
 		PromptingStrategy.PatchBased02WithoutRecentLineNumbers,
 	].includes(options.promptingStrategy)) // eagerness prompt option is only supported for patch-based strategies
 		|| [PromptingStrategy.XtabAggressiveness,
@@ -614,7 +614,7 @@ export namespace ResponseFormat {
 			case PromptingStrategy.PatchBased02:
 			case PromptingStrategy.PatchBased02WithRecentLineNumbers:
 			case PromptingStrategy.PatchBased02Optimized:
-			case PromptingStrategy.PatchBased02OptimizedFourInOne:
+			case PromptingStrategy.PatchBased02OptimizedEagerness:
 			case PromptingStrategy.PatchBased02WithoutRecentLineNumbers:
 				return ResponseFormat.CustomDiffPatch;
 			case PromptingStrategy.Xtab275EditIntent:
@@ -832,7 +832,7 @@ const STRATEGY_CONFIG: Partial<Record<PromptingStrategy, Partial<ModelConfigurat
 		supportsNextCursorLinePrediction: false,
 		allowImportChanges: ImportChanges.All,
 	},
-	[PromptingStrategy.PatchBased02OptimizedFourInOne]: {
+	[PromptingStrategy.PatchBased02OptimizedEagerness]: {
 		eagernessPrompt: 'aggressionHighLow',
 	},
 };

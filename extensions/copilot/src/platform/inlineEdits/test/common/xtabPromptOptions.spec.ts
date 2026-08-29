@@ -98,9 +98,9 @@ describe('applyStrategyConfig', () => {
 		expect(result.currentFile?.includeLineNumbers).toBe(IncludeLineNumbersOption.WithoutSpace);
 	});
 
-	it('sets the four-in-one eagerness prompt for PatchBased02OptimizedFourInOne', () => {
+	it('sets the eagerness prompt for PatchBased02OptimizedEagerness', () => {
 		const result = applyStrategyConfig(baseConfig({
-			promptingStrategy: PromptingStrategy.PatchBased02OptimizedFourInOne,
+			promptingStrategy: PromptingStrategy.PatchBased02OptimizedEagerness,
 		}));
 		expect(result.eagernessPrompt).toBe('aggressionHighLow');
 		expect(applyStrategyConfig(baseConfig({
@@ -172,7 +172,7 @@ describe('isEagernessPrompt', () => {
 
 	it('recognizes the standalone four-in-one strategy after strategy config is applied', () => {
 		const config = applyStrategyConfig(baseConfig({
-			promptingStrategy: PromptingStrategy.PatchBased02OptimizedFourInOne,
+			promptingStrategy: PromptingStrategy.PatchBased02OptimizedEagerness,
 		}));
 		const options = {
 			...DEFAULT_OPTIONS,
