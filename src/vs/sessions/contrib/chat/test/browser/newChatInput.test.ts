@@ -17,7 +17,7 @@ import { ITextModel } from '../../../../../editor/common/model.js';
 import { IResolvedTextEditorModel } from '../../../../../editor/common/services/resolverService.js';
 import { FileKind } from '../../../../../platform/files/common/files.js';
 import { ColorScheme } from '../../../../../platform/theme/common/theme.js';
-import { FolderThemeIcon } from '../../../../../platform/theme/common/themeService.js';
+import { FileThemeIcon, FolderThemeIcon } from '../../../../../platform/theme/common/themeService.js';
 import { IFileLabelOptions } from '../../../../../workbench/browser/labels.js';
 import { hasSendableNewChatContent, NewChatInputWidget } from '../../browser/newChatInput.js';
 import { IChatRequestVariableEntry } from '../../../../../workbench/contrib/chat/common/attachments/chatVariableEntries.js';
@@ -73,6 +73,12 @@ interface IAttachmentRenderingHarness {
 	readonly themeService: {
 		getFileIconTheme(): { hasFileIcons: boolean; hasFolderIcons: boolean };
 		getColorTheme(): { type: ColorScheme };
+	};
+	readonly modelService: {
+		getModel(): null;
+	};
+	readonly languageService: {
+		guessLanguageIdByFilepathOrFirstLine(): string;
 	};
 	removeAttachment(id: string): void;
 }
@@ -241,9 +247,19 @@ suite('NewChatInputWidget', () => {
 				name: 'Unknown context',
 				value: 'unknown',
 			},
+			{
+				kind: 'string',
+				id: 'themed-file',
+				name: 'Themed file',
+				value: 'themed-file',
+				uri: URI.parse('vscode://context/themed-file'),
+				resourceUri: URI.file('/workspace/src/index.ts'),
+				iconPath: FileThemeIcon,
+				handle: 1,
+			},
 		];
 		let removed: string | undefined;
-		const labels: { label: string; icon?: string }[] = [];
+		const labels: { label: string; icon?: string; extraClasses?: readonly string[] }[] = [];
 		const files: { resource: string; fileKind?: FileKind; icon?: string }[] = [];
 		const renderDisposables = disposables.add(new DisposableStore());
 		updateAttachmentRendering.call({
@@ -261,6 +277,7 @@ suite('NewChatInputWidget', () => {
 						setLabel: (label, _description, options) => labels.push({
 							label,
 							icon: ThemeIcon.isThemeIcon(options?.iconPath) ? options.iconPath.id : options?.iconPath?.toString(),
+							extraClasses: options?.extraClasses,
 						}),
 						setFile: (resource, options) => files.push({
 							resource: resource.path,
@@ -274,10 +291,17 @@ suite('NewChatInputWidget', () => {
 				getFileIconTheme: () => ({ hasFileIcons: true, hasFolderIcons: false }),
 				getColorTheme: () => ({ type: ColorScheme.DARK }),
 			},
+			modelService: {
+				getModel: () => null,
+			},
+			languageService: {
+				guessLanguageIdByFilepathOrFirstLine: () => 'typescript',
+			},
 			removeAttachment: id => removed = id,
 		});
 		const removeButton = container.querySelector<HTMLButtonElement>('.sessions-chat-attachment-remove');
 		const pill = container.querySelector<HTMLElement>('.sessions-chat-attachment-pill');
+		const openTarget = pill?.querySelector<HTMLElement>('.sessions-chat-attachment-content');
 		let bubbledKeyDown = false;
 		pill?.addEventListener('keydown', () => bubbledKeyDown = true);
 		removeButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -288,6 +312,11 @@ suite('NewChatInputWidget', () => {
 			tabIndex: removeButton?.tabIndex,
 			ariaLabel: removeButton?.getAttribute('aria-label'),
 			pillChildren: Array.from(pill?.children ?? []).map(child => child.className),
+			openTarget: {
+				role: openTarget?.role,
+				tabIndex: openTarget?.tabIndex,
+				containsRemoveButton: openTarget?.contains(removeButton),
+			},
 			bubbledKeyDown,
 			removed,
 			files,
@@ -296,7 +325,12 @@ suite('NewChatInputWidget', () => {
 			tagName: 'BUTTON',
 			tabIndex: 0,
 			ariaLabel: 'Remove README.md',
-			pillChildren: ['sessions-chat-attachment-remove', 'resource-label'],
+			pillChildren: ['sessions-chat-attachment-remove', 'sessions-chat-attachment-content'],
+			openTarget: {
+				role: 'button',
+				tabIndex: 0,
+				containsRemoveButton: false,
+			},
 			bubbledKeyDown: false,
 			removed: entries[0].id,
 			files: [
@@ -304,8 +338,13 @@ suite('NewChatInputWidget', () => {
 				{ resource: '/workspace/spritesheet', fileKind: FileKind.FOLDER, icon: FolderThemeIcon.id },
 			],
 			labels: [
-				{ label: 'Known context', icon: Codicon.repo.id },
-				{ label: 'Unknown context', icon: Codicon.attach.id },
+				{ label: 'Known context', icon: Codicon.repo.id, extraClasses: undefined },
+				{ label: 'Unknown context', icon: Codicon.attach.id, extraClasses: undefined },
+				{
+					label: 'Themed file',
+					icon: undefined,
+					extraClasses: ['file-icon', 'src-name-dir-icon', 'index.ts-name-file-icon', 'name-file-icon', 'ts-ext-file-icon', 'ext-file-icon', 'typescript-lang-file-icon'],
+				},
 			],
 		});
 	});
@@ -344,6 +383,12 @@ suite('NewChatInputWidget', () => {
 			themeService: {
 				getFileIconTheme: () => ({ hasFileIcons: true, hasFolderIcons: false }),
 				getColorTheme: () => ({ type: ColorScheme.DARK }),
+			},
+			modelService: {
+				getModel: () => null,
+			},
+			languageService: {
+				guessLanguageIdByFilepathOrFirstLine: () => 'typescript',
 			},
 			removeAttachment: () => { },
 		});

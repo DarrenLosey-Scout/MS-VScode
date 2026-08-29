@@ -150,10 +150,11 @@ export class NewChatContextAttachments extends Disposable implements INewChatAtt
 				this.removeAttachment(entry.id);
 			}));
 
+			const content = dom.append(pill, dom.$('.sessions-chat-attachment-content'));
 			const resource = URI.isUri(entry.value) ? entry.value : isLocation(entry.value) ? entry.value.uri : undefined;
 			if (entry.kind === 'image') {
-				const icon = dom.append(pill, renderIcon(Codicon.fileMedia));
-				dom.append(pill, dom.$('span.sessions-chat-attachment-name', undefined, entry.name));
+				const icon = dom.append(content, renderIcon(Codicon.fileMedia));
+				dom.append(content, dom.$('span.sessions-chat-attachment-name', undefined, entry.name));
 				const buffer = coerceImageBuffer(entry.value);
 				if (buffer) {
 					// Swap the generic icon for a thumbnail once the shared helper
@@ -166,11 +167,11 @@ export class NewChatContextAttachments extends Disposable implements INewChatAtt
 					this._renderDisposables.add(preview.disposable);
 				}
 			} else if (entry.id.startsWith(ADDITIONAL_REPOSITORY_CONTEXT_ID_PREFIX)) {
-				const icon = dom.append(pill, renderIcon(Codicon.repo));
+				const icon = dom.append(content, renderIcon(Codicon.repo));
 				icon.setAttribute('aria-hidden', 'true');
-				dom.append(pill, dom.$('span.sessions-chat-attachment-name', undefined, entry.name));
+				dom.append(content, dom.$('span.sessions-chat-attachment-name', undefined, entry.name));
 			} else {
-				const label = this._resourceLabels.create(pill);
+				const label = this._resourceLabels.create(content);
 				this._renderDisposables.add(label);
 				if (resource && (entry.kind === 'file' || entry.kind === 'directory')) {
 					const fileIconTheme = this.themeService.getFileIconTheme();
@@ -187,21 +188,26 @@ export class NewChatContextAttachments extends Disposable implements INewChatAtt
 					label.setLabel(entry.fileName, undefined, this.themeService.getFileIconTheme().hasFileIcons
 						? { extraClasses: ['file-icon', `${entry.language}-lang-file-icon`] }
 						: { iconPath: FileThemeIcon });
-					dom.append(pill, dom.$('span.sessions-chat-attachment-info', undefined, localize('pastedLines', "Pasted {0}", entry.pastedLines)));
+					dom.append(content, dom.$('span.sessions-chat-attachment-info', undefined, localize('pastedLines', "Pasted {0}", entry.pastedLines)));
 				} else {
 					const iconPath = (isStringVariableEntry(entry) || entry.kind === 'generic') ? entry.iconPath : undefined;
-					const icon = iconPath
-						? resolveChatContextIcon(iconPath, isDark(this.themeService.getColorTheme().type))
-						: entry.icon ?? Codicon.attach;
-					label.setLabel(entry.fullName ?? entry.name, undefined, { iconPath: icon });
+					const attachmentLabel = entry.fullName ?? entry.name;
+					if (isStringVariableEntry(entry) && ThemeIcon.isThemeIcon(iconPath) && (ThemeIcon.isFile(iconPath) || ThemeIcon.isFolder(iconPath)) && entry.resourceUri) {
+						const fileKind = ThemeIcon.isFolder(iconPath) ? FileKind.FOLDER : FileKind.FILE;
+						label.setLabel(attachmentLabel, undefined, { extraClasses: getIconClasses(this.modelService, this.languageService, entry.resourceUri, fileKind) });
+					} else {
+						const icon = iconPath
+							? resolveChatContextIcon(iconPath, isDark(this.themeService.getColorTheme().type))
+							: entry.icon ?? Codicon.attach;
+						label.setLabel(attachmentLabel, undefined, { iconPath: icon });
+					}
 				}
 			}
 
-			// Click to open the resource or image
 			const imageData = entry.kind === 'image' ? coerceImageBuffer(entry.value) : undefined;
 			if (imageData) {
-				pill.style.cursor = 'pointer';
-				this._renderDisposables.add(registerOpenEditorListeners(pill, async () => {
+				content.style.cursor = 'pointer';
+				this._renderDisposables.add(registerOpenEditorListeners(content, async () => {
 					if (this.configurationService.getValue<boolean>(ChatConfiguration.ImageCarouselEnabled)) {
 						const imageResource = resource ?? URI.from({ scheme: 'data', path: entry.name });
 						await this.chatImageCarouselService.openCarouselAtResource(imageResource, imageData);
@@ -210,23 +216,20 @@ export class NewChatContextAttachments extends Disposable implements INewChatAtt
 					}
 				}));
 			} else if (resource) {
-				pill.style.cursor = 'pointer';
-				this._renderDisposables.add(registerOpenEditorListeners(pill, async () => {
+				content.style.cursor = 'pointer';
+				this._renderDisposables.add(registerOpenEditorListeners(content, async () => {
 					await this.openerService.open(resource, { fromUserGesture: true });
 				}));
 			} else if (isPastedTextArtifact(entry)) {
-				pill.style.cursor = 'pointer';
-				this._renderDisposables.add(registerOpenEditorListeners(pill, async () => {
+				content.style.cursor = 'pointer';
+				this._renderDisposables.add(registerOpenEditorListeners(content, async () => {
 					await this.instantiationService.invokeFunction(openPastedTextArtifact, entry);
 				}));
 			}
 
-			// Only expose the pill itself as a focusable button when it has an open
-			// action; reference pills without a resource (e.g. `#session`) would
-			// otherwise be a focusable control that does nothing.
 			if (imageData || resource || isPastedTextArtifact(entry)) {
-				pill.tabIndex = 0;
-				pill.role = 'button';
+				content.tabIndex = 0;
+				content.role = 'button';
 			}
 		}
 	}
