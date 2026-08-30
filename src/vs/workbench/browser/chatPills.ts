@@ -3,16 +3,23 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, EventType, reset } from '../../base/browser/dom.js';
+import { $, addDisposableListener, DisposableResizeObserver, EventHelper, EventType, isHTMLElement, reset } from '../../base/browser/dom.js';
+import { StandardKeyboardEvent } from '../../base/browser/keyboardEvent.js';
+import { mainWindow, type CodeWindow } from '../../base/browser/window.js';
 import { IActionViewItem } from '../../base/browser/ui/actionbar/actionbar.js';
 import { BaseActionViewItem, IActionViewItemOptions } from '../../base/browser/ui/actionbar/actionViewItems.js';
 import { Button } from '../../base/browser/ui/button/button.js';
+import { DomScrollableElement } from '../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ToolBar } from '../../base/browser/ui/toolbar/toolbar.js';
 import { IAction, IActionRunner } from '../../base/common/actions.js';
+import { disposableTimeout } from '../../base/common/async.js';
 import { Emitter, Event } from '../../base/common/event.js';
+import { MarkdownString } from '../../base/common/htmlContent.js';
+import { KeyCode } from '../../base/common/keyCodes.js';
 import { isMacintosh } from '../../base/common/platform.js';
-import { Disposable } from '../../base/common/lifecycle.js';
+import { Disposable, MutableDisposable } from '../../base/common/lifecycle.js';
 import { autorun, derived, IObservable } from '../../base/common/observable.js';
+import { ScrollbarVisibility } from '../../base/common/scrollable.js';
 import { ThemeIcon } from '../../base/common/themables.js';
 import { URI } from '../../base/common/uri.js';
 import { localize } from '../../nls.js';
@@ -63,6 +70,17 @@ export interface IChatPillSection {
 	readonly entries: readonly IChatPillEntry[];
 }
 
+/** Describes a pill entry's target while keeping its accessible name action-oriented. */
+export function getChatPillResourceLocation(uri: URI, label: string, ariaLabel = localize('chatPills.open', "Open {0}", label)): Pick<IChatPillEntry, 'ariaDescription' | 'ariaLabel' | 'hover' | 'tooltip'> {
+	const value = uri.toString(true);
+	return {
+		ariaDescription: value,
+		ariaLabel,
+		hover: { content: new MarkdownString().appendText(value) },
+		tooltip: value,
+	};
+}
+
 export function getChatPillEntries(sections: readonly IChatPillSection[]): readonly IChatPillEntry[] {
 	return sections.flatMap(section => section.entries);
 }
@@ -75,6 +93,148 @@ export interface IChatPillsWidgetOptions {
 	 * it per item, which would hide the pills from a surrounding context menu.
 	 */
 	readonly allowContextMenu?: boolean;
+}
+
+/**
+ * The floating row's rendered height: 2px/4px vertical padding around a 22px
+ * small button. Hosts reserve this much transcript space while the row is shown.
+ */
+export const CHAT_INPUT_PILLS_ROW_HEIGHT = 28;
+
+export type ChatPillsCompactMode = boolean | 'auto';
+
+export interface IChatPillsRowOptions {
+	/** Collapses pills to their icons and uses tighter spacing while preserving full accessible labels and tooltips. */
+	readonly compact?: ChatPillsCompactMode;
+	/** Window that owns the row. Required when rendering in an auxiliary window. */
+	readonly targetWindow?: CodeWindow;
+}
+
+/** Shared horizontally scrollable row for pills mounted above a chat input. */
+export class ChatPillsRow extends Disposable {
+
+	readonly element: HTMLElement;
+	readonly content: HTMLElement;
+
+	private readonly _scrollable: DomScrollableElement;
+	private readonly _resizeObserver: DisposableResizeObserver;
+	private readonly _mutationObserver: MutationObserver | undefined;
+	private _isLayouting = false;
+	private readonly _onDidChangeLayout = this._register(new Emitter<void>());
+	readonly onDidChangeLayout: Event<void> = this._onDidChangeLayout.event;
+	private readonly _onDidRequestContextMenu = this._register(new Emitter<HTMLElement>());
+	readonly onDidRequestContextMenu: Event<HTMLElement> = this._onDidRequestContextMenu.event;
+	private readonly _pendingFocus = this._register(new MutableDisposable());
+
+	constructor(debugName: string, options?: IChatPillsRowOptions) {
+		super();
+
+		const targetWindow = options?.targetWindow ?? mainWindow;
+		this.content = $('.chat-pills-row-content');
+		this._scrollable = this._register(new DomScrollableElement(this.content, {
+			horizontal: ScrollbarVisibility.Auto,
+			horizontalScrollbarSize: 6,
+			scrollYToX: true,
+			vertical: ScrollbarVisibility.Hidden,
+		}));
+		this.element = this._scrollable.getDomNode();
+		this.element.classList.add('chat-pills-row');
+		const compactMode = options?.compact ?? false;
+		this.element.classList.toggle('compact', compactMode === true);
+
+		this._resizeObserver = this._register(new DisposableResizeObserver(debugName, () => this.layout(), targetWindow));
+		this._register(this._resizeObserver.observe(this.content));
+		if (compactMode === 'auto') {
+			this._mutationObserver = new targetWindow.MutationObserver(() => this.layout());
+			this._observeMutations();
+			this._register({ dispose: () => this._mutationObserver?.disconnect() });
+		} else {
+			this._mutationObserver = undefined;
+		}
+		this._register(this._scrollable.onScroll(event => {
+			if (event.scrollLeftChanged) {
+				this._onDidChangeLayout.fire();
+			}
+		}));
+		this._register(addDisposableListener(this.content, EventType.FOCUS_IN, () => this.scanDomNode()));
+		this._register(addDisposableListener(this.content, EventType.KEY_DOWN, event => {
+			const keyboardEvent = new StandardKeyboardEvent(event);
+			const target = isHTMLElement(event.target) ? event.target : this.content;
+			const activatesEmptyRow = target === this.content && (keyboardEvent.keyCode === KeyCode.Enter || keyboardEvent.keyCode === KeyCode.Space);
+			if (activatesEmptyRow
+				|| keyboardEvent.keyCode === KeyCode.ContextMenu
+				|| (keyboardEvent.shiftKey && keyboardEvent.keyCode === KeyCode.F10)) {
+				EventHelper.stop(event, true);
+				this._onDidRequestContextMenu.fire(target);
+			}
+		}));
+	}
+
+	observe(element: HTMLElement): void {
+		this._register(this._resizeObserver.observe(element));
+		this.layout();
+	}
+
+	layout(): void {
+		if (this._isLayouting || !this.element.isConnected) {
+			return;
+		}
+
+		this._isLayouting = true;
+		this._mutationObserver?.disconnect();
+		try {
+			if (this._mutationObserver) {
+				this.element.classList.remove('compact');
+				const availableWidth = this.element.getBoundingClientRect().width;
+				this.element.classList.toggle('compact', availableWidth > 0 && this.content.scrollWidth > availableWidth + 1);
+			}
+			this.scanDomNode();
+			this._onDidChangeLayout.fire();
+		} finally {
+			this._observeMutations();
+			this._isLayouting = false;
+		}
+	}
+
+	scanDomNode(): void {
+		this._scrollable.scanDomNode();
+	}
+
+	private _observeMutations(): void {
+		this._mutationObserver?.observe(this.content, {
+			attributes: true,
+			attributeFilter: ['class', 'hidden', 'style'],
+			characterData: true,
+			childList: true,
+			subtree: true,
+		});
+	}
+
+	setEmpty(empty: boolean, ariaLabel: string): void {
+		this.element.classList.toggle('empty', empty);
+		if (empty) {
+			this.content.tabIndex = 0;
+			this.content.setAttribute('role', 'button');
+			this.content.setAttribute('aria-label', ariaLabel);
+			this.content.setAttribute('aria-haspopup', 'menu');
+		} else {
+			this.content.removeAttribute('tabindex');
+			this.content.removeAttribute('role');
+			this.content.removeAttribute('aria-label');
+			this.content.removeAttribute('aria-haspopup');
+		}
+	}
+
+	restoreFocus(getPillElements: () => readonly HTMLElement[]): void {
+		this._pendingFocus.value = disposableTimeout(() => {
+			const pill = getPillElements().at(0);
+			if (pill) {
+				pill.focus();
+			} else if (this.element.classList.contains('empty')) {
+				this.content.focus();
+			}
+		});
+	}
 }
 
 /**
@@ -275,9 +435,7 @@ export abstract class ChatPillActionViewItemBase extends BaseActionViewItem {
 	}
 }
 
-/**
- * Compact `icon + label` rendering, the default for chat pill actions.
- */
+/** The default `icon + label` rendering for chat pill actions. */
 export class ChatPillActionViewItem extends ChatPillActionViewItemBase {
 
 	constructor(context: unknown, action: IAction, options: IActionViewItemOptions) {
