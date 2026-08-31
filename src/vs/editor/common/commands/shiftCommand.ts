@@ -6,6 +6,7 @@
 import { CharCode } from '../../../base/common/charCode.js';
 import * as strings from '../../../base/common/strings.js';
 import { CursorColumns } from '../core/cursorColumns.js';
+import { InsertSpaces } from '../core/misc/indentation.js';
 import { Range } from '../core/range.js';
 import { Selection, SelectionDirection } from '../core/selection.js';
 import { ICommand, ICursorStateComputerData, IEditOperationBuilder } from '../editorCommon.js';
@@ -18,7 +19,7 @@ export interface IShiftCommandOpts {
 	isUnshift: boolean;
 	tabSize: number;
 	indentSize: number;
-	insertSpaces: boolean;
+	insertSpaces: InsertSpaces;
 	useTabStops: boolean;
 	autoIndent: EditorAutoIndentStrategy;
 }
@@ -40,37 +41,47 @@ function cachedStringRepeat(str: string, count: number): string {
 
 export class ShiftCommand implements ICommand {
 
-	public static unshiftIndent(line: string, column: number, tabSize: number, indentSize: number, insertSpaces: boolean): string {
+	public static unshiftIndent(line: string, column: number, tabSize: number, indentSize: number, insertSpaces: InsertSpaces): string {
 		// Determine the visible column where the content starts
 		const contentStartVisibleColumn = CursorColumns.visibleColumnFromColumn(line, column, tabSize);
 
-		if (insertSpaces) {
+		if (insertSpaces === InsertSpaces.Spaces) {
 			const indent = cachedStringRepeat(' ', indentSize);
 			const desiredTabStop = CursorColumns.prevIndentTabStop(contentStartVisibleColumn, indentSize);
 			const indentCount = desiredTabStop / indentSize; // will be an integer
 			return cachedStringRepeat(indent, indentCount);
-		} else {
+		} else if (insertSpaces === InsertSpaces.Tabs) {
 			const indent = '\t';
 			const desiredTabStop = CursorColumns.prevRenderTabStop(contentStartVisibleColumn, tabSize);
 			const indentCount = desiredTabStop / tabSize; // will be an integer
 			return cachedStringRepeat(indent, indentCount);
+		} else {
+			const desiredTabStop = CursorColumns.prevIndentTabStop(contentStartVisibleColumn, indentSize);
+			const tabsCount = Math.floor(desiredTabStop / tabSize);
+			const spacesCount = desiredTabStop % tabSize;
+			return cachedStringRepeat('\t', tabsCount) + cachedStringRepeat(' ', spacesCount);
 		}
 	}
 
-	public static shiftIndent(line: string, column: number, tabSize: number, indentSize: number, insertSpaces: boolean): string {
+	public static shiftIndent(line: string, column: number, tabSize: number, indentSize: number, insertSpaces: InsertSpaces): string {
 		// Determine the visible column where the content starts
 		const contentStartVisibleColumn = CursorColumns.visibleColumnFromColumn(line, column, tabSize);
 
-		if (insertSpaces) {
+		if (insertSpaces === InsertSpaces.Spaces) {
 			const indent = cachedStringRepeat(' ', indentSize);
-			const desiredTabStop = CursorColumns.nextIndentTabStop(contentStartVisibleColumn, indentSize);
+			const desiredTabStop = CursorColumns.nextRenderTabStop(contentStartVisibleColumn, indentSize);
 			const indentCount = desiredTabStop / indentSize; // will be an integer
 			return cachedStringRepeat(indent, indentCount);
-		} else {
+		} else if (insertSpaces === InsertSpaces.Tabs) {
 			const indent = '\t';
 			const desiredTabStop = CursorColumns.nextRenderTabStop(contentStartVisibleColumn, tabSize);
 			const indentCount = desiredTabStop / tabSize; // will be an integer
 			return cachedStringRepeat(indent, indentCount);
+		} else {
+			const desiredTabStop = CursorColumns.nextRenderTabStop(contentStartVisibleColumn, indentSize);
+			const tabsCount = Math.floor(desiredTabStop / tabSize);
+			const spacesCount = desiredTabStop % tabSize;
+			return cachedStringRepeat('\t', tabsCount) + cachedStringRepeat(' ', spacesCount);
 		}
 	}
 
@@ -201,7 +212,7 @@ export class ShiftCommand implements ICommand {
 				this._useLastEditRangeForCursorEndPosition = true;
 			}
 
-			const oneIndent = (insertSpaces ? cachedStringRepeat(' ', indentSize) : '\t');
+			const oneIndent = (insertSpaces === InsertSpaces.Spaces ? cachedStringRepeat(' ', indentSize) : '\t');
 
 			for (let lineNumber = startLine; lineNumber <= endLine; lineNumber++) {
 				const lineText = model.getLineContent(lineNumber);

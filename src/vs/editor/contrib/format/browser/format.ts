@@ -14,6 +14,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { CodeEditorStateFlag, EditorStateCancellationTokenSource, TextModelCancellationTokenSource } from '../../editorState/browser/editorState.js';
 import { IActiveCodeEditor, isCodeEditor } from '../../../browser/editorBrowser.js';
 import { ServicesAccessor } from '../../../browser/editorExtensions.js';
+import { InsertSpaces } from '../../../common/core/misc/indentation.js';
 import { Position } from '../../../common/core/position.js';
 import { Range } from '../../../common/core/range.js';
 import { Selection } from '../../../common/core/selection.js';
@@ -429,7 +430,7 @@ export async function getDocumentFormattingEditsWithSelectedProvider(
 	const provider = getRealAndSyntheticDocumentFormattersOrdered(languageFeaturesService.documentFormattingEditProvider, languageFeaturesService.documentRangeFormattingEditProvider, model);
 	const selected = await FormattingConflicts.select(provider, model, mode, FormattingKind.File);
 	if (selected) {
-		const rawEdits = await Promise.resolve(selected.provideDocumentFormattingEdits(model, model.getOptions(), token)).catch(onUnexpectedExternalError);
+		const rawEdits = await Promise.resolve(selected.provideDocumentFormattingEdits(model, model.getFormattingOptions(), token)).catch(onUnexpectedExternalError);
 		return await workerService.computeMoreMinimalEdits(model.uri, rawEdits);
 	}
 	return undefined;
@@ -521,7 +522,7 @@ function ensureFormattingOptions(options: unknown, reference: IReference<IResolv
 		const modelOptions = reference.object.textEditorModel.getOptions();
 		validatedOptions = {
 			tabSize: modelOptions.tabSize,
-			insertSpaces: modelOptions.insertSpaces
+			insertSpaces: modelOptions.insertSpaces !== InsertSpaces.Tabs
 		};
 	}
 

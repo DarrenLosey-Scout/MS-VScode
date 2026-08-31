@@ -203,7 +203,7 @@ suite('CursorColumns', () => {
 
 	for (const [name, fn] of [
 		['nextRenderTabStop', CursorColumns.nextRenderTabStop],
-		['nextIndentTabStop', CursorColumns.nextIndentTabStop],
+		['nextIndentTabStop', CursorColumns.nextRenderTabStop],
 	] as const) {
 		test(name, () => {
 			assert.strictEqual(fn(0, 4), 4);

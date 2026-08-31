@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IEditorOptions } from '../../common/config/editorOptions.js';
+import { InsertSpaces } from '../../common/core/misc/indentation.js';
 
 export interface ISettingsReader {
 	(key: string): unknown;
@@ -95,6 +96,12 @@ registerSimpleEditorSettingMigration('occurrencesHighlight', [[true, 'singleFile
 registerSimpleEditorSettingMigration('wordBasedSuggestions', [[true, 'matchingDocuments'], [false, 'off']]);
 registerSimpleEditorSettingMigration('defaultColorDecorators', [[true, 'auto'], [false, 'never']]);
 registerSimpleEditorSettingMigration('minimap.autohide', [[true, 'mouseover'], [false, 'none']]);
+
+registerEditorSettingMigration('insertSpaces', (value, _read, write) => {
+	if (typeof value === 'boolean') {
+		write('insertSpaces', value ? InsertSpaces.Spaces : InsertSpaces.Tabs);
+	}
+});
 
 registerEditorSettingMigration('autoClosingBrackets', (value, read, write) => {
 	if (value === false) {

@@ -24,6 +24,7 @@ import { createScopedLineTokens } from '../languages/supports.js';
 import { getIndentActionForType, getIndentForEnter, getInheritIndentForLine } from '../languages/autoIndent.js';
 import { getEnterAction } from '../languages/enterAction.js';
 import { CompositionOutcome } from './cursorTypeOperations.js';
+import { InsertSpaces } from '../core/misc/indentation.js';
 
 export class AutoIndentOperation {
 
@@ -542,6 +543,10 @@ export class EnterOperation {
 		}
 		const r = getEnterAction(config.autoIndent, model, range, config.languageConfigurationService);
 		if (r) {
+			// const hasLogicalIndent = r.indentAction === IndentAction.Indent || (r.indentAction === IndentAction.IndentOutdent && r.appendText === '\t');
+			// const appendText = config.insertSpaces === InsertSpaces.Mixed && hasLogicalIndent
+			// 	? ' '.repeat(config.indentSize) + r.appendText.substring(1)
+			// 	: r.appendText;
 			if (r.indentAction === IndentAction.None) {
 				// Nothing special
 				return typeCommand(range, '\n' + config.normalizeIndentation(r.indentation + r.appendText), keepPosition);
@@ -597,7 +602,7 @@ export class EnterOperation {
 				} else {
 					let offset = 0;
 					if (oldEndColumn <= firstNonWhitespace + 1) {
-						if (!config.insertSpaces) {
+						if (config.insertSpaces === InsertSpaces.Tabs) {
 							oldEndViewColumn = Math.ceil(oldEndViewColumn / config.indentSize);
 						}
 						offset = Math.min(oldEndViewColumn + 1 - config.normalizeIndentation(ir.afterEnter).length - 1, 0);
@@ -782,7 +787,7 @@ export class TabOperation {
 				const lineText = model.getLineContent(selection.startLineNumber);
 				if (/^\s*$/.test(lineText) && model.tokenization.isCheapToTokenize(selection.startLineNumber)) {
 					let goodIndent = this._goodIndentForLine(config, model, selection.startLineNumber);
-					goodIndent = goodIndent || '\t';
+					goodIndent = goodIndent || (config.insertSpaces === InsertSpaces.Mixed ? ' '.repeat(config.indentSize) : '\t');
 					const possibleTypeText = config.normalizeIndentation(goodIndent);
 					if (!lineText.startsWith(possibleTypeText)) {
 						commands[i] = new ReplaceCommand(new Range(selection.startLineNumber, 1, selection.startLineNumber, lineText.length + 1), possibleTypeText, true);
@@ -853,15 +858,31 @@ export class TabOperation {
 		return indentation;
 	}
 
-	private static _replaceJumpToNextIndent(config: CursorConfiguration, model: ICursorSimpleModel, selection: Selection, insertsAutoWhitespace: boolean): ReplaceCommand {
+	private static _replaceJumpToNextIndent(config: CursorConfiguration, model: ICursorSimpleModel, selection: Selection, insertsAutoWhitespace: boolean): ICommand {
 		let typeText = '';
 		const position = selection.getStartPosition();
-		if (config.insertSpaces) {
+		if (config.insertSpaces === InsertSpaces.Spaces) {
 			const visibleColumnFromColumn = config.visibleColumnFromColumn(model, position);
 			const indentSize = config.indentSize;
 			const spacesCnt = indentSize - (visibleColumnFromColumn % indentSize);
 			for (let i = 0; i < spacesCnt; i++) {
 				typeText += ' ';
+			}
+		} else if (config.insertSpaces === InsertSpaces.Mixed) {
+			const firstNonWhitespaceColumn = model.getLineFirstNonWhitespaceColumn(selection.endLineNumber);
+			const indentationBoundaryColumn = firstNonWhitespaceColumn || model.getLineMaxColumn(selection.endLineNumber);
+			const isInsideLineContent = selection.endColumn > indentationBoundaryColumn;
+			if (isInsideLineContent) {
+				typeText = '\t';
+			} else {
+				return new ShiftCommand(selection, {
+					isUnshift: false,
+					tabSize: config.tabSize,
+					indentSize: config.indentSize,
+					insertSpaces: config.insertSpaces,
+					useTabStops: config.useTabStops,
+					autoIndent: config.autoIndent
+				}, config.languageConfigurationService);
 			}
 		} else {
 			typeText = '\t';

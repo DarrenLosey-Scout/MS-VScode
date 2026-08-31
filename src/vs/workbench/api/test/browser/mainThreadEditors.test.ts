@@ -12,6 +12,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { IBulkEditService } from '../../../../editor/browser/services/bulkEditService.js';
 import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { EditOperation, ISingleEditOperation } from '../../../../editor/common/core/editOperation.js';
+import { InsertSpaces } from '../../../../editor/common/core/misc/indentation.js';
 import { Position } from '../../../../editor/common/core/position.js';
 import { Range } from '../../../../editor/common/core/range.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
@@ -254,6 +255,24 @@ suite('MainThreadEditors', () => {
 
 		return bulkEdits.$tryApplyWorkspaceEdit(new SerializableObjectWithBuffers({ edits: [workspaceResourceEdit] })).then((result) => {
 			assert.strictEqual(result, false);
+		});
+	});
+
+	test('indentation auto-detection honors an explicit indentation size', () => {
+		const model = modelService.getModel(existingResource)!;
+		model.applyEdits([EditOperation.replace(model.getFullModelRange(), '\t first\n\t second')]);
+
+		testEditor.setConfiguration({
+			tabSize: 8,
+			indentSize: 3,
+			insertSpaces: 'auto'
+		});
+
+		const { tabSize, indentSize, insertSpaces } = model.getOptions();
+		assert.deepStrictEqual({ tabSize, indentSize, insertSpaces }, {
+			tabSize: 8,
+			indentSize: 3,
+			insertSpaces: InsertSpaces.Mixed
 		});
 	});
 

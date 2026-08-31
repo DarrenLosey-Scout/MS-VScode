@@ -9,6 +9,7 @@ import { IStringDictionary } from '../../../../base/common/collections.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { FormattingOptions } from '../../../../base/common/jsonFormatter.js';
 import { URI } from '../../../../base/common/uri.js';
+import { InsertSpaces } from '../../../../editor/common/core/misc/indentation.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { ITextResourcePropertiesService, ITextResourceConfigurationService } from '../../../../editor/common/services/textResourceConfiguration.js';
 
@@ -41,12 +42,12 @@ class UserDataSyncUtilService implements IUserDataSyncUtilService {
 			const { insertSpaces, tabSize } = modelReference.object.textEditorModel.getOptions();
 			const eol = modelReference.object.textEditorModel.getEOL();
 			modelReference.dispose();
-			return { eol, insertSpaces, tabSize };
+			return { eol, insertSpaces: insertSpaces !== InsertSpaces.Tabs, tabSize };
 		} catch (e) {
 		}
 		return {
 			eol: this.textResourcePropertiesService.getEOL(resource),
-			insertSpaces: !!this.textResourceConfigurationService.getValue(resource, 'editor.insertSpaces'),
+			insertSpaces: this.textResourceConfigurationService.getValue<InsertSpaces>(resource, 'editor.insertSpaces') !== InsertSpaces.Tabs,
 			tabSize: this.textResourceConfigurationService.getValue(resource, 'editor.tabSize')
 		};
 	}

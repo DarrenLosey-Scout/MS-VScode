@@ -7,6 +7,7 @@ import { Emitter, Event } from '../../../base/common/event.js';
 import { DisposableStore } from '../../../base/common/lifecycle.js';
 import { ICodeEditor } from '../../../editor/browser/editorBrowser.js';
 import { RenderLineNumbersType, TextEditorCursorStyle, cursorStyleToString, EditorOption } from '../../../editor/common/config/editorOptions.js';
+import { InsertSpaces } from '../../../editor/common/core/misc/indentation.js';
 import { IRange, Range } from '../../../editor/common/core/range.js';
 import { ISelection, Selection } from '../../../editor/common/core/selection.js';
 import { IDecorationOptions, ScrollType } from '../../../editor/common/editorCommon.js';
@@ -78,7 +79,7 @@ export class MainThreadTextEditorProperties {
 
 		const modelOptions = model.getOptions();
 		return {
-			insertSpaces: modelOptions.insertSpaces,
+			insertSpaces: modelOptions.insertSpaces !== InsertSpaces.Tabs,
 			tabSize: modelOptions.tabSize,
 			indentSize: modelOptions.indentSize,
 			originalIndentSize: modelOptions.originalIndentSize,
@@ -362,20 +363,25 @@ export class MainThreadTextEditor {
 			let tabSize = creationOpts.tabSize;
 
 			if (newConfiguration.insertSpaces !== 'auto' && typeof newConfiguration.insertSpaces !== 'undefined') {
-				insertSpaces = newConfiguration.insertSpaces;
+				insertSpaces = newConfiguration.insertSpaces ? InsertSpaces.Spaces : InsertSpaces.Tabs;
 			}
 
 			if (newConfiguration.tabSize !== 'auto' && typeof newConfiguration.tabSize !== 'undefined') {
 				tabSize = newConfiguration.tabSize;
 			}
 
-			this._model.detectIndentation(insertSpaces, tabSize);
+			let indentSize = creationOpts.indentSize === 'tabSize' ? tabSize : creationOpts.indentSize;
+			if (typeof newConfiguration.indentSize !== 'undefined') {
+				indentSize = newConfiguration.indentSize === 'tabSize' ? tabSize : newConfiguration.indentSize;
+			}
+
+			this._model.detectIndentation(insertSpaces, tabSize, indentSize);
 			return;
 		}
 
 		const newOpts: ITextModelUpdateOptions = {};
 		if (typeof newConfiguration.insertSpaces !== 'undefined') {
-			newOpts.insertSpaces = newConfiguration.insertSpaces;
+			newOpts.insertSpaces = newConfiguration.insertSpaces ? InsertSpaces.Spaces : InsertSpaces.Tabs;
 		}
 		if (typeof newConfiguration.tabSize !== 'undefined') {
 			newOpts.tabSize = newConfiguration.tabSize;
