@@ -42,7 +42,18 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 	// for open, change and close text document events
 	documents.listen(connection);
 
-	const stylesheets = getLanguageModelCache<Stylesheet>(10, 60, document => getLanguageService(document).parseStylesheet(document));
+	const stylesheets = getLanguageModelCache<Stylesheet>(10, 60, document => {
+		// Avoid parsing documents that are not handled by any language service (e.g. plain PHP files).
+		// Parsing a non-CSS document as CSS produced false positives (colors in selectors).
+		// For unsupported documents, return the stylesheet for an empty CSS document.
+		// Do NOT fall back to parsing the unsupported document itself — let the caller
+		// (runSafeAsync) handle any parsing exceptions.
+		if (!languageServices[document.languageId]) {
+			const emptyDoc = TextDocument.create(document.uri + '.css', 'css', document.version, '');
+			return languageServices['css'].parseStylesheet(emptyDoc);
+		}
+		return getLanguageService(document).parseStylesheet(document);
+	});
 	documents.onDidClose(e => {
 		stylesheets.onDocumentRemoved(e.document);
 	});
@@ -195,10 +206,17 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		});
 	}
 
+	function isSupportedDocument(document: TextDocument) {
+		return Object.prototype.hasOwnProperty.call(languageServices, document.languageId);
+	}
+
 	connection.onCompletion((textDocumentPosition, token) => {
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(textDocumentPosition.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return null;
+				}
 				const [settings,] = await Promise.all([getDocumentSettings(document), dataProvidersReady]);
 				const styleSheet = stylesheets.get(document);
 				const documentContext = getDocumentContext(document.uri, workspaceFolders);
@@ -212,6 +230,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(textDocumentPosition.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return null;
+				}
 				const [settings,] = await Promise.all([getDocumentSettings(document), dataProvidersReady]);
 				const styleSheet = stylesheets.get(document);
 				return getLanguageService(document).doHover(document, textDocumentPosition.position, styleSheet, settings?.hover);
@@ -224,6 +245,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(documentSymbolParams.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).findDocumentSymbols2(document, stylesheet);
@@ -236,6 +260,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(documentDefinitionParams.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return null;
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).findDefinition(document, documentDefinitionParams.position, stylesheet);
@@ -248,6 +275,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(documentHighlightParams.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).findDocumentHighlights(document, documentHighlightParams.position, stylesheet);
@@ -261,6 +291,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(documentLinkParams.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const documentContext = getDocumentContext(document.uri, workspaceFolders);
 				const stylesheet = stylesheets.get(document);
@@ -275,6 +308,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(referenceParams.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).findReferences(document, referenceParams.position, stylesheet);
@@ -287,6 +323,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(codeActionParams.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).doCodeActions2(document, codeActionParams.range, codeActionParams.context, stylesheet);
@@ -299,6 +338,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(params.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).findDocumentColors(document, stylesheet);
@@ -311,6 +353,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(params.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).getColorPresentations(document, stylesheet, params.color, params.range);
@@ -323,6 +368,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(renameParameters.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return null;
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).doRename(document, renameParameters.position, renameParameters.newName, stylesheet);
@@ -335,6 +383,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		return runSafeAsync(runtime, async () => {
 			const document = documents.get(params.textDocument.uri);
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return null;
+				}
 				await dataProvidersReady;
 				return getLanguageService(document).getFoldingRanges(document, { rangeLimit: foldingRangeLimit });
 			}
@@ -348,6 +399,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 			const positions: Position[] = params.positions;
 
 			if (document) {
+				if (!isSupportedDocument(document)) {
+					return [];
+				}
 				await dataProvidersReady;
 				const stylesheet = stylesheets.get(document);
 				return getLanguageService(document).getSelectionRanges(document, positions, stylesheet);
@@ -359,6 +413,9 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 	async function onFormat(textDocument: TextDocumentIdentifier, range: Range | undefined, options: FormattingOptions): Promise<TextEdit[]> {
 		const document = documents.get(textDocument.uri);
 		if (document) {
+			if (!isSupportedDocument(document)) {
+				return [];
+			}
 			const edits = getLanguageService(document).format(document, range ?? getFullRange(document), options);
 			if (edits.length > formatterMaxNumberOfEdits) {
 				const newText = TextDocument.applyEdits(document, edits);
