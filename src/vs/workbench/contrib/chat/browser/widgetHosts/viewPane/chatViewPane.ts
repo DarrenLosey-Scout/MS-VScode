@@ -1106,6 +1106,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
 				dndContainer: parent,
+				suppressSessionStateIndicator: true,
 			},
 			{
 				listForeground: SIDE_BAR_FOREGROUND,
