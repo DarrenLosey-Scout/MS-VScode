@@ -191,6 +191,18 @@ export function createAgentHostResourceUriMapper(connectionAuthority: string): I
 }
 
 /**
+ * Reinterpret a remote-namespace URI as a path on the machine this host runs on.
+ * The host reads its own filesystem through `file:`, so a client's
+ * `vscode-remote:` URI resolves to nothing here.
+ */
+export function toHostLocalUri(resource: URI): URI {
+	if (resource.scheme !== Schemas.vscodeRemote) {
+		return resource;
+	}
+	return URI.file(resource.fsPath).with({ query: resource.query, fragment: resource.fragment });
+}
+
+/**
  * Strips the redundant `ws://` scheme from an address. The transport layer
  * already defaults to `ws://`, so only `wss://` needs to be preserved.
  */
