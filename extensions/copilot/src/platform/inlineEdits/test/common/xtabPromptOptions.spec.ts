@@ -157,6 +157,7 @@ describe('MODEL_CONFIGURATION_VALIDATOR', () => {
 describe('isEagernessPrompt', () => {
 	it('recognizes the PatchBased02 aggression prompt option', () => {
 		expect(isEagernessPrompt({ ...DEFAULT_OPTIONS, promptingStrategy: PromptingStrategy.PatchBased02, eagernessPrompt: 'aggressionHighLow' })).toBe(true);
+		expect(isEagernessPrompt({ ...DEFAULT_OPTIONS, promptingStrategy: PromptingStrategy.PatchBased02Optimized, eagernessPrompt: 'aggressionHighLow' })).toBe(true);
 		expect(isEagernessPrompt({ ...DEFAULT_OPTIONS, promptingStrategy: PromptingStrategy.PatchBased02 })).toBe(false);
 	});
 });
