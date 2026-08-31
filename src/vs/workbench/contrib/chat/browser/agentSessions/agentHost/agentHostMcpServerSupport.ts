@@ -620,15 +620,15 @@ function projectMcpServerConfiguration(launch: McpServerLaunch): IMcpServerConfi
 				command: launch.command,
 				args: launch.args.length > 0 ? [...launch.args] : undefined,
 				env: Object.keys(launch.env).length > 0 ? { ...launch.env } : undefined,
-				envFile: launch.envFile,
-				cwd: launch.cwd,
+				...(launch.envFile !== undefined ? { envFile: launch.envFile } : {}),
+				...(launch.cwd !== undefined ? { cwd: launch.cwd } : {}),
 			};
 		case McpServerTransportType.HTTP:
 			return {
 				type: McpServerType.REMOTE,
 				transport: launch.transport === 'sse' ? 'sse' : 'http',
 				url: launch.uri.toString(),
-				headers: launch.headers.length > 0 ? Object.fromEntries(launch.headers) : undefined,
+				...(launch.headers.length > 0 ? { headers: Object.fromEntries(launch.headers) } : {}),
 			};
 	}
 }
