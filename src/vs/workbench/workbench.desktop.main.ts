@@ -114,6 +114,8 @@ registerSingleton(IUserDataInitializationService, new SyncDescriptor(UserDataIni
 // Logs
 import './contrib/logs/electron-browser/logs.contribution.js';
 
+// Speech
+
 // Localizations
 import './contrib/localization/electron-browser/localization.contribution.js';
 
@@ -186,6 +188,7 @@ import './contrib/remoteTunnel/electron-browser/remoteTunnel.contribution.js';
 
 // Chat
 import './contrib/chat/electron-browser/chat.contribution.js';
+import './contrib/speech/electron-browser/speech.contribution.js';
 import './contrib/chat/electron-browser/tunnelHost.contribution.js';
 
 // Copilot Voice
