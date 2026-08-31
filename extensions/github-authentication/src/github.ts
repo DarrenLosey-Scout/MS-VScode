@@ -601,6 +601,7 @@ export class GitHubAuthenticationProvider implements vscode.AuthenticationProvid
 		});
 
 		if (added.length || removed.length) {
+			this._logger.trace(`Session change: source=secret-storage, added=${added.length}, removed=${removed.length}, changed=0.`);
 			this._sessionChangeEmitter.fire({ added, removed, changed: [] });
 		}
 	}
@@ -748,6 +749,7 @@ export class GitHubAuthenticationProvider implements vscode.AuthenticationProvid
 			}
 			await this.storeSessions(sessions);
 
+			this._logger.trace(`Session change: source=interactive-login, added=1, removed=${removed.length}, changed=0.`);
 			this._sessionChangeEmitter.fire({ added: [session], removed, changed: [] });
 
 			this._logger.info('Login success!');
