@@ -648,6 +648,7 @@ try {
 		logFile = $logFile
 		repo = $repo
 		agents = [bool]$agents
+		preLaunchSkipped = [bool]$skipPreLaunch
 		timings = [PSCustomObject]@{
 			profileMs = $profileReadyMs
 			preLaunchMs = $preLaunchReadyMs - $profileReadyMs
