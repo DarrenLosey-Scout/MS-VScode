@@ -207,7 +207,7 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 			if (!group || group.contains(e.editor)) {
 				return;
 			}
-			void this._sequencer.queue(() => this._removeFilesTab(this._editorGroupsService.mainPart.activeGroup)).catch(onUnexpectedError);
+			this._queue(() => this._removeFilesTab(this._editorGroupsService.mainPart.activeGroup));
 		}));
 		this._register(this._editorService.onDidCloseEditor(e => {
 			if (e.editor instanceof EmptyFileEditorInput
@@ -245,7 +245,7 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 			}
 
 			if (visible) {
-				void this._sequencer.queue(() => this._restoreCollapsedTabs()).catch(onUnexpectedError);
+				this._queue(() => this._restoreCollapsedTabs());
 				return;
 			}
 
@@ -254,7 +254,7 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 				return;
 			}
 			if (this._layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
-				void this._sequencer.queue(() => this._collapseNonManagedTabs()).catch(onUnexpectedError);
+				this._queue(() => this._collapseNonManagedTabs());
 			}
 		}));
 
@@ -294,7 +294,7 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 			: trigger;
 		this._pending = { sessionKey, target, trigger: mergedTrigger };
 		const generation = ++this._generation;
-		void this._sequencer.queue(() => this._reconcile(generation)).catch(onUnexpectedError);
+		this._queue(() => this._reconcile(generation));
 	}
 
 	private _readTarget(reader: IReader | undefined): IManagedTabsTarget {
@@ -310,8 +310,28 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 
 	// --- Reconcile --------------------------------------------------------
 
+	override dispose(): void {
+		// Cancel any pending/in-flight reconciles queued on the sequencer: bumping the
+		// generation makes queued reconciles bail at their entry (and in-flight ones at their
+		// next generation checkpoint) so none open editors — which would instantiate an editor
+		// pane through the now-disposed instantiation service after teardown.
+		this._generation++;
+		this._pending = undefined;
+		super.dispose();
+	}
+
+	/**
+	 * Queues coordinator-owned async work on the sequencer with a disposal guard so that a task
+	 * still queued (or resumed) after teardown never touches editors through the now-disposed
+	 * instantiation service. Every sequencer task must go through here — the reconcile pipeline
+	 * as well as the collapse/restore/files-tab tasks all open or close editors.
+	 */
+	private _queue(task: () => Promise<void>): void {
+		void this._sequencer.queue(() => this._store.isDisposed ? Promise.resolve() : task()).catch(onUnexpectedError);
+	}
+
 	private async _reconcile(generation: number): Promise<void> {
-		if (generation !== this._generation || !this._pending) {
+		if (this._store.isDisposed || generation !== this._generation || !this._pending) {
 			return;
 		}
 
@@ -343,6 +363,9 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 		// group is never mistaken for the user closing all tabs (which would close the side pane).
 		const suppression = this._layoutService.suppressEditorPartAutoVisibility();
 		try {
+			if (this._store.isDisposed) {
+				return;
+			}
 			// [1] Replace an outgoing session's Changes tab in place when the incoming
 			// session also wants Changes; close only additional stale tabs.
 			await this._reconcileForeignChangesEditors(group, changesResource);
@@ -536,7 +559,7 @@ export class SinglePaneDockedTabsCoordinator extends Disposable {
 
 	private _queueCollapseIfDetailsOnly(): void {
 		if (!this._layoutService.isVisible(Parts.EDITOR_PART, mainWindow) && this._layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
-			void this._sequencer.queue(() => this._collapseNonManagedTabs()).catch(onUnexpectedError);
+			this._queue(() => this._collapseNonManagedTabs());
 		}
 	}
 
