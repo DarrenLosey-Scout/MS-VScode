@@ -65,6 +65,12 @@ export interface IAgentHostManagedSettingsPermissions {
 	ask?: string[];
 }
 
+/**
+ * Deprecated opt-in that used to gate this bridge. The mapping is now the
+ * default enforcement path, so the configured value is ignored: honoring an
+ * explicit `false` would let a user switch off restrictions an administrator
+ * configured through the legacy settings this bridge reads.
+ */
 export const AgentHostMapLegacySettingsToManagedSettingsSettingId = 'chat.agentHost.copilot.mapLegacySettingsToManagedSettings';
 
 /**
@@ -276,7 +282,6 @@ const managedPermissionsSettings: readonly IManagedPermissionsSettingMapping[] =
 ];
 
 export const managedPermissionsConfigurationIds = [
-	AgentHostMapLegacySettingsToManagedSettingsSettingId,
 	...managedPermissionsSettings.flatMap(mapping => [mapping.settingId, ...mapping.additionalSettingIds ?? []]),
 ];
 
@@ -301,17 +306,15 @@ function isStringArrayOrUndefined(value: unknown): boolean {
  * Combines every mapping's contribution into the single document sent to the
  * host, deduplicating rules that more than one setting produced.
  *
- * Contributing any rule at all makes the runtime's managed policy "active",
- * which causes unmatched shell, read, write, URL and factory requests to require
- * approval. That is broader than any individual mapping intends, but it errs
- * toward prompting, and the alternative — an `allow` list — resolves to
- * auto-approval. See the module comment.
+ * The rules contributed here bind without broadening anything else: the runtime
+ * treats client-injected managed permissions as non-activating, so a lone `deny`
+ * or `ask` rule is enforced while unmatched shell, read, write, URL and factory
+ * requests keep falling through to the host's normal approval flow. External
+ * server and MDM layers still activate the blanket "unmatched requests must be
+ * approved" lockdown, and a managed `allow` list remains something this bridge
+ * must not contribute — see the module comment.
  */
 export function resolveManagedSettingsPermissions(configurationService: IConfigurationService): IAgentHostManagedSettingsPermissions {
-	if (getGlobalConfigurationValue<boolean>(configurationService, AgentHostMapLegacySettingsToManagedSettingsSettingId) !== true) {
-		return {};
-	}
-
 	const deny = new Set<string>();
 	const ask = new Set<string>();
 	let disableBypassPermissionsMode: 'disable' | undefined;

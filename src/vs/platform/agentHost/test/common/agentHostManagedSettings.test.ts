@@ -22,7 +22,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('combines restrictive contributions from explicitly configured global values', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[GLOBAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: false, policyValue: false },
 			[TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID]: { defaultValue: true, userValue: false },
 		});
@@ -35,7 +34,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('respects global precedence and ignores defaults and workspace values', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[GLOBAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: false, userValue: false, policyValue: true },
 			[TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID]: { defaultValue: false, workspaceValue: false, workspaceFolderValue: false },
 		});
@@ -45,11 +43,9 @@ suite('AgentHostManagedSettings', () => {
 
 	test('does not promote user or application preferences to managed bypass restrictions', () => {
 		const userConfigurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[GLOBAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: false, userValue: false },
 		});
 		const applicationConfigurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[GLOBAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: false, applicationValue: false },
 		});
 
@@ -59,27 +55,47 @@ suite('AgentHostManagedSettings', () => {
 		], [{}, {}]);
 	});
 
-	test('does not map legacy settings while the compatibility bridge is disabled', () => {
+	test('maps legacy settings without any opt-in present', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false },
 			[GLOBAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: false, userValue: false },
 			[TERMINAL_AUTO_APPROVE_ENABLED_SETTING_ID]: { defaultValue: true, userValue: false },
 		});
 
-		assert.deepStrictEqual(resolveManagedSettingsPermissions(configurationService), {});
+		assert.deepStrictEqual(resolveManagedSettingsPermissions(configurationService), {
+			ask: ['Shell'],
+		});
 	});
 
-	test('returns an empty contribution after explicit restrictions are removed', () => {
-		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, applicationValue: true },
-		});
+	test('ignores the deprecated opt-in, so it cannot switch off a mapped restriction', () => {
+		const restricted = {
+			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
+			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [] },
+			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: { defaultValue: [], policyValue: ['evil.example'] },
+		};
+
+		assert.deepStrictEqual([
+			resolveManagedSettingsPermissions(createConfigurationService({
+				...restricted,
+				[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: true, userValue: false },
+			})),
+			resolveManagedSettingsPermissions(createConfigurationService({
+				...restricted,
+				[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: true, userValue: true },
+			})),
+		], [
+			{ deny: ['Domain(evil.example)'] },
+			{ deny: ['Domain(evil.example)'] },
+		]);
+	});
+
+	test('returns an empty contribution when no legacy setting is restricted', () => {
+		const configurationService = createConfigurationService({});
 
 		assert.deepStrictEqual(resolveManagedSettingsPermissions(configurationService), {});
 	});
 
 	test('deduplicates a rule that more than one entry produces', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
 			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [] },
 			// Three spellings of the same host, which all normalize to one rule.
@@ -96,7 +112,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('reduces denied domains to the host the network filter matches on', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
 			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [] },
 			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: {
@@ -112,7 +127,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('denies configured domains while the network filter is on', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
 			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: { defaultValue: [], policyValue: ['evil.com', '*.tracker.example'] },
 			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [], policyValue: ['github.com'] },
@@ -125,7 +139,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('denies every domain when the filter is on and neither list is configured', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
 			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: { defaultValue: [] },
 			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [] },
@@ -136,7 +149,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('contributes nothing from domain lists while the network filter is off', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false },
 			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: { defaultValue: [], policyValue: ['evil.com'] },
 		});
@@ -146,7 +158,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('skips denied domain patterns the SDK cannot express', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
 			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: { defaultValue: [], policyValue: ['$(evil)', 'ok.example'] },
 			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [] },
@@ -159,7 +170,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('maps a bare wildcard denial onto the all-domains family rule', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[AgentNetworkDomainSettingId.NetworkFilter]: { defaultValue: false, policyValue: true },
 			[AgentNetworkDomainSettingId.DeniedNetworkDomains]: { defaultValue: [], policyValue: ['*'] },
 			[AgentNetworkDomainSettingId.AllowedNetworkDomains]: { defaultValue: [] },
@@ -170,7 +180,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('requires approval for explicitly denied terminal commands', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[TERMINAL_AUTO_APPROVE_SETTING_ID]: {
 				defaultValue: {},
 				policyValue: { rm: false, 'git push': false, npm: true },
@@ -184,7 +193,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('skips terminal denials the SDK shell grammar cannot express', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[TERMINAL_AUTO_APPROVE_SETTING_ID]: {
 				defaultValue: {},
 				policyValue: {
@@ -202,7 +210,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('keeps an absolute command path that VS Code treats as a literal', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			// Starts and ends with `/` but the trailing segment is not a flag list,
 			// so the auto-approver reads it as a path rather than a regular expression.
 			[TERMINAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: {}, policyValue: { '/usr/bin/rm': false } },
@@ -215,7 +222,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('skips a wildcard command key rather than broadening it', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			// `*` is a literal in VS Code but a command-boundary wildcard in the SDK,
 			// so bridging this would require approval for every git command.
 			[TERMINAL_AUTO_APPROVE_SETTING_ID]: { defaultValue: {}, policyValue: { 'git *': false, 'rm': false } },
@@ -228,7 +234,6 @@ suite('AgentHostManagedSettings', () => {
 
 	test('treats a long-form sub-command denial like a bare false', () => {
 		const configurationService = createConfigurationService({
-			[AgentHostMapLegacySettingsToManagedSettingsSettingId]: { defaultValue: false, userValue: true },
 			[TERMINAL_AUTO_APPROVE_SETTING_ID]: {
 				defaultValue: {},
 				policyValue: { rm: { approve: false }, ls: { approve: true } },
