@@ -8,6 +8,29 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Range } from '../../../common/core/range.js';
 import { MATCHES_LIMIT } from './findModel.js';
 
+function searchScopesEqual(a: Range[] | null, b: Range[] | null): boolean {
+	if (a === b) {
+		return true;
+	}
+	if (!a || !b || a.length !== b.length) {
+		return false;
+	}
+	// Fast path: the ranges usually arrive in the same order they were stored in.
+	if (a.every((rangeA, i) => Range.equalsRange(rangeA, b[i]))) {
+		return true;
+	}
+	// Fallback: order-insensitive comparison that still counts duplicates.
+	const matched = new Array<boolean>(b.length).fill(false);
+	return a.every(rangeA => {
+		const index = b.findIndex((rangeB, i) => !matched[i] && Range.equalsRange(rangeA, rangeB));
+		if (index === -1) {
+			return false;
+		}
+		matched[index] = true;
+		return true;
+	});
+}
+
 export interface FindReplaceStateChangedEvent {
 	moveCursor: boolean;
 	updateHistory: boolean;
@@ -252,11 +275,7 @@ export class FindReplaceState<T extends { update: (value: T) => void } = { updat
 			this._preserveCase = newState.preserveCase;
 		}
 		if (typeof newState.searchScope !== 'undefined') {
-			if (!newState.searchScope?.every((newSearchScope) => {
-				return this._searchScope?.some(existingSearchScope => {
-					return !Range.equalsRange(existingSearchScope, newSearchScope);
-				});
-			})) {
+			if (!searchScopesEqual(newState.searchScope, this._searchScope)) {
 				this._searchScope = newState.searchScope;
 				changeEvent.searchScope = true;
 				somethingChanged = true;
