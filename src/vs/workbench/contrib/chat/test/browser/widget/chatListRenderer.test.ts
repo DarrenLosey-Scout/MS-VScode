@@ -1429,7 +1429,7 @@ suite('ChatListRenderer', () => {
 		const renderer = disposables.add(instantiationService.createInstance(
 			ChatListItemRenderer,
 			{} as ChatEditorOptions,
-			{},
+			{ animateCompletedResponseCollapse: false },
 			{
 				getListLength: () => 1,
 				onDidScroll: () => toDisposable(() => { }),
@@ -1445,6 +1445,7 @@ suite('ChatListRenderer', () => {
 		const template = renderer.renderTemplate(container);
 		disposables.add(toDisposable(() => renderer.disposeTemplate(template)));
 		const node = { element: response, children: [], depth: 0, visibleChildrenCount: 0, visibleChildIndex: 0, collapsible: false, collapsed: false, visible: true, filterData: undefined };
+		renderer.renderElement(node, 0, template);
 
 		for (const callId of ['call-1', 'call-2']) {
 			const toolInvocation = new ChatToolInvocation({
@@ -1465,6 +1466,7 @@ suite('ChatListRenderer', () => {
 
 		const disclosure = container.querySelector<HTMLDetailsElement>('.completed-response-disclosure');
 		const summary = disclosure?.querySelector<HTMLElement>('.completed-response-summary');
+		const initiallyOpen = disclosure?.open;
 
 		let announcedToggles = 0;
 		const listener = () => announcedToggles++;
@@ -1475,10 +1477,14 @@ suite('ChatListRenderer', () => {
 		assert.deepStrictEqual({
 			hasDisclosure: !!disclosure,
 			summaryLabel: summary?.textContent,
+			initiallyOpen,
+			openAfterClick: disclosure?.open,
 			announcedToggles,
 		}, {
 			hasDisclosure: true,
 			summaryLabel: 'Completed 2 steps',
+			initiallyOpen: false,
+			openAfterClick: true,
 			announcedToggles: 1,
 		});
 
